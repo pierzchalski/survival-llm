@@ -8,12 +8,13 @@ import json
 import os
 import re
 import urllib.error
-import urllib.request
 
+import backends
 from library.search import STOPWORDS, TOPICS
 from memory import _stems, asked_memory, forgets
 
 HOST = "http://" + os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
+BACKEND = backends.OllamaBackend(HOST)  # the server that answers (backends/)
 MAX_TOOL_ROUNDS = 6
 # Longest reply the model may write in one go, set by the person's "Length limit" (tokens; -1 = no limit). A model
 # stuck repeating itself would otherwise run, and drain the battery, until someone noticed (Qwen 3.6 once went an
@@ -77,16 +78,6 @@ SAMPLING = {
     "granite": {"temperature": 0.3, "top_p": 0.9},
     "gemma": {"temperature": 0.7, "top_p": 0.95, "top_k": 64},
 }
-_shown = {}  # model -> Ollama's /api/show answer
-
-
-def _show(model):
-    if model not in _shown:
-        try:
-            _shown[model] = _post("/api/show", {"model": model})
-        except (OSError, ValueError):
-            return {}  # not cached: Ollama may just not be running yet
-    return _shown[model]
 
 
 def family(model):
@@ -94,20 +85,12 @@ def family(model):
     known = next((f for f in SAMPLING if f in model.lower()), "")
     if known:
         return known
-    details = _show(model).get("details") or {}
-    names = " ".join([details.get("family") or ""] + (details.get("families") or [])).lower()
+    names = BACKEND.family_hint(model).lower()
     return next((f for f in SAMPLING if f in names), "")
 
 
-def _post(path, body, stream=False):
-    req = urllib.request.Request(HOST + path, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    resp = urllib.request.urlopen(req, timeout=900)
-    return resp if stream else json.load(resp)
-
-
 def capabilities(model):
-    return set(_show(model).get("capabilities") or [])
+    return BACKEND.capabilities(model)
 
 
 def think_setting(model, caps, reasoning="off"):
@@ -218,14 +201,8 @@ def run_tool(library, name, args):
 
 
 def _stream(model, messages, tools, think, options):
-    body = {"model": model, "messages": messages, "stream": True, "keep_alive": "15m", "options": options}
-    if tools:
-        body["tools"] = tools
-    if think is not None:
-        body["think"] = think
-    with _post("/api/chat", body, stream=True) as resp:
-        for line in resp:
-            yield json.loads(line)
+    """The model's answer as Ollama's /api/chat chunks, whichever server gives it."""
+    yield from BACKEND.chat_stream(model, messages, tools, think, options)
 
 
 def attach_excerpts(library, messages):
@@ -825,8 +802,4 @@ def trim(messages, budget=60000):
 
 
 def installed_models():
-    try:
-        with urllib.request.urlopen(HOST + "/api/tags", timeout=5) as resp:
-            return [m["name"] for m in json.load(resp).get("models", [])]
-    except OSError:
-        return None  # Ollama is not running
+    return BACKEND.models()  # None when the server can't be reached
