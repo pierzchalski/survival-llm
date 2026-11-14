@@ -306,6 +306,38 @@ check("the retry asks for no reasoning", stub.requests[-1]["body"].get("reasonin
       stub.requests[-1]["body"])
 check("and gets its answer", next(e for e in events if e["type"] == "done")["answer"] == "Outdoors only.")
 
+# ---- reasoning before a tool call goes back with it (smoke test: colibri re-read the whole chat every round) ----
+reasoned = [delta(reasoning_content="Need the "), delta(reasoning_content="library."),
+            delta(tool_calls=[{"index": 0, "id": "c9", "type": "function",
+                               "function": {"name": "search_library", "arguments": '{"query": "burn"}'}}]),
+            finish("tool_calls")]
+chunks, req = run(backend, reasoned)
+made = final(chunks)["message"]["tool_calls"]
+check("reasoning is kept on the first call", made[0].get("reasoning") == {"reasoning_content": "Need the library."},
+      made)
+history = MESSAGES + [{"role": "assistant", "content": "", "tool_calls": made},
+                      {"role": "tool", "tool_name": "search_library", "content": "[id 1] Burns"}]
+chunks, req = run(backend, [delta(content="Cool it."), finish()], messages=history)
+sent = req["body"]["messages"][2]
+check("and sent back as reasoning_content", sent.get("reasoning_content") == "Need the library.", sent)
+check("not inside the call", "reasoning" not in sent["tool_calls"][0] and "reasoning_content" not in
+      sent["tool_calls"][0], sent)
+chunks, req = run(backend, [delta(tool_calls=[{"index": 0, "id": "c10", "type": "function",
+                                               "function": {"name": "search_library", "arguments": "{}"}}]),
+                            finish("tool_calls")])
+check("no reasoning, nothing kept", "reasoning" not in final(chunks)["message"]["tool_calls"][0])
+# A server that streams it as "reasoning" (Ollama's /v1, for one) gets it back as "reasoning", not as a field it
+# never named
+chunks, req = run(backend, [delta(reasoning="Search."), delta(tool_calls=[
+    {"index": 0, "id": "c11", "type": "function", "function": {"name": "search_library", "arguments": "{}"}}]),
+    finish("tool_calls")])
+made = final(chunks)["message"]["tool_calls"]
+chunks, req = run(backend, [delta(content="Cool it."), finish()], messages=MESSAGES + [
+    {"role": "assistant", "content": "", "tool_calls": made}, {"role": "tool", "content": "[id 1] Burns"}])
+sent = req["body"]["messages"][2]
+check("streamed as reasoning, sent back as reasoning", sent.get("reasoning") == "Search."
+      and "reasoning_content" not in sent, sent)
+
 stub.close()
 print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
 sys.exit(1 if FAILS else 0)

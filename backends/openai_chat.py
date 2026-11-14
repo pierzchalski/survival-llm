@@ -19,6 +19,7 @@ from .remote import RemoteBackend
 #   chat_template_kwargs  "chat_template_kwargs": {"enable_thinking": true/false}
 THINKING = ("none", "reasoning_effort", "enable_thinking", "chat_template_kwargs")
 EFFORT = {False: "none", "low": "low", True: "medium", "xhigh": "xhigh"}
+REASONING = ("reasoning_content", "reasoning", "thinking")  # the delta fields servers stream reasoning in
 
 
 def to_openai(messages):
@@ -38,7 +39,13 @@ def to_openai(messages):
                 args = fn.get("arguments")
                 calls.append({"id": call_id, "type": "function", "function": {
                     "name": fn.get("name") or "", "arguments": args if isinstance(args, str) else json.dumps(args or {})}})
-            out.append({"role": "assistant", "content": content, "tool_calls": calls})
+            entry = {"role": "assistant", "content": content, "tool_calls": calls}
+            # The reasoning that led to the calls goes back under the field the server streamed it in (see read()),
+            # so the server sees the history it generated and can reuse what it already read.
+            kept = m["tool_calls"][0].get("reasoning")
+            if isinstance(kept, dict):
+                entry.update({k: v for k, v in kept.items() if k in REASONING and isinstance(v, str) and v.strip()})
+            out.append(entry)
         else:
             out.append({"role": role, "content": content})
     return out
@@ -78,6 +85,7 @@ class OpenAIBackend(RemoteBackend):
     def read(self, events):
         """Ollama-shaped chunks from the text of each server-sent event (None for a keepalive comment)."""
         calls, usage, finish, pieces, started, heard = {}, {}, None, 0, None, False
+        reasoning, field = [], None  # this reply's reasoning, kept with its tool calls; the field it came in
         for data in events:
             if data is None:
                 yield {"message": {}}  # a keepalive: nothing to show, but the server can notice a closed page
@@ -96,10 +104,11 @@ class OpenAIBackend(RemoteBackend):
             choice = next((c for c in event.get("choices") or [] if isinstance(c, dict)), {})
             delta = choice.get("delta") or {}
             msg = {}
-            thought = next((delta[k] for k in ("reasoning_content", "reasoning", "thinking")
-                            if isinstance(delta.get(k), str) and delta[k]), "")
-            if thought:
-                msg["thinking"] = thought
+            key = next((k for k in REASONING if isinstance(delta.get(k), str) and delta[k]), None)
+            if key:
+                msg["thinking"] = delta[key]
+                reasoning.append(delta[key])
+                field = field or key
             if isinstance(delta.get("content"), str) and delta["content"]:
                 msg["content"] = delta["content"]
             for part in delta.get("tool_calls") or []:
@@ -128,6 +137,10 @@ class OpenAIBackend(RemoteBackend):
             if slot["name"]:  # a call with no name can't be run or sent back
                 call = {"function": {"name": slot["name"], "arguments": parse_arguments(slot["args"])}}
                 made.append({"id": slot["id"], **call} if slot["id"] else call)
+        if made and "".join(reasoning).strip():
+            # Kept on the first call (as AnthropicBackend keeps thinking blocks) so to_openai can send it back in the
+            # field it came in. Only a server that streamed reasoning gets it back.
+            made[0]["reasoning"] = {field: "".join(reasoning)}
         yield {"message": {"tool_calls": made} if made else {}, "done": True,
                "done_reason": "length" if finish == "length" else "stop",
                "eval_count": usage.get("completion_tokens") or pieces,
