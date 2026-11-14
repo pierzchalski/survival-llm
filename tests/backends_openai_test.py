@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import core  # noqa: E402
 from backends import BackendError, OpenAIBackend  # noqa: E402
-from backends.base import parse_arguments  # noqa: E402
+from backends.base import STOPPED, parse_arguments  # noqa: E402
 from stub_server import Reply, Stub, checker, json_reply, sse_reply  # noqa: E402
 
 check, FAILS = checker()
@@ -174,6 +174,13 @@ check("arguments go as JSON text", sent[2]["tool_calls"][0]["function"]["argumen
 check("tool_name stays home", all("tool_name" not in m for m in sent), sent)
 check("the made-up ids are the same next time", run(backend, [delta(content="x"), finish()], messages=history)[1]
       ["body"]["messages"][2]["tool_calls"][0]["id"] == first_ids[0])
+stopped = history[:4] + [{"role": "user", "content": "never mind"}]  # stopped after the first of two lookups
+sent = run(backend, [delta(content="x"), finish()], messages=stopped)[1]["body"]["messages"]
+check("a call a stopped turn never answered gets a placeholder result", [(m["role"], m.get("tool_call_id"),
+                                                                          m["content"]) for m in sent[3:]]
+      == [("tool", first_ids[0], "ra"), ("tool", first_ids[1], STOPPED), ("user", None, "never mind")], sent[3:])
+sent = run(backend, [delta(content="x"), finish()], messages=history[:3])[1]["body"]["messages"]
+check("also when the chat ends on the calls", [m.get("tool_call_id") for m in sent[3:]] == first_ids, sent[3:])
 
 # ---- errors, and the key ----
 stub.queue("POST", PATH, Reply([json.dumps({"error": {"message": f"Incorrect API key provided: {KEY}",

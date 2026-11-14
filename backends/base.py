@@ -66,14 +66,24 @@ def parse_arguments(text):
     return text
 
 
+STOPPED = "No result: the lookup was stopped before it ran."
+
+
 def paired(messages):
     """Each message with the wire ids that go with it, as (message, ids): for an assistant message, a list with one id
     per tool call (the id the server gave, else a made-up one); for a tool result, the id of the call it answers,
     pairing results with calls in order as core._used_ids does (None when there is no call left to answer); else
-    None. The stored chat keeps Ollama's shape, which has no ids."""
+    None. The stored chat keeps Ollama's shape, which has no ids.
+
+    A turn stopped while its tools ran (Stop, or Ctrl+C in chat.py) leaves calls with no result, which the
+    OpenAI- and Anthropic-shape APIs don't allow; each such call gets a STOPPED result here, after the ones it has."""
     pending, made = [], 0
     for m in messages:
         role = m.get("role")
+        if role != "tool":
+            for call_id in pending:
+                yield {"role": "tool", "content": STOPPED}, call_id
+            pending = []
         if role == "assistant":
             ids = []
             for call in m.get("tool_calls") or []:
@@ -85,3 +95,5 @@ def paired(messages):
             yield m, pending.pop(0) if pending else None
         else:
             yield m, None
+    for call_id in pending:
+        yield {"role": "tool", "content": STOPPED}, call_id

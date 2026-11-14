@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import core  # noqa: E402
 from backends import AnthropicBackend, BackendError  # noqa: E402
+from backends.base import STOPPED  # noqa: E402
 from stub_server import Reply, Stub, checker, json_reply, sse_reply  # noqa: E402
 
 check, FAILS = checker()
@@ -188,6 +189,11 @@ check("with no tools sent yet, the ones the chat used are declared", [t["name"] 
       == ["search_library", "read_article"] and req["body"].get("tool_choice") == {"type": "none"}, req["body"])
 chunks, req = run(backend, text("x"))
 check("a chat with no lookups in it sends neither", "tools" not in req["body"] and "tool_choice" not in req["body"])
+chunks, req = run(backend, text("x"), messages=history[:4] + [{"role": "user", "content": "never mind"}])
+check("a call a stopped turn never answered gets a placeholder tool_result", req["body"]["messages"][2]["content"] == [
+    {"type": "tool_result", "tool_use_id": "toolu_01", "content": "ra"},
+    {"type": "tool_result", "tool_use_id": made_up, "content": STOPPED},
+    {"type": "text", "text": "never mind"}], req["body"]["messages"][2])
 chunks, req = run(backend, text("x"), messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "q"},
                                                 {"role": "assistant", "content": ""}, {"role": "user", "content": "q2"}])
 check("an empty answer leaves no empty block, and the users' turns merge",
