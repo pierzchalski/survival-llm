@@ -22,9 +22,10 @@ EFFORT = {False: "none", "low": "low", True: "medium", "xhigh": "xhigh"}
 REASONING = ("reasoning_content", "reasoning", "thinking")  # the delta fields servers stream reasoning in
 
 
-def to_openai(messages):
+def to_openai(messages, answers=None):
     """The stored chat (Ollama's shape) as chat-completions messages: tool calls get ids and their arguments as JSON
-    text, and each tool result names the call it answers."""
+    text, and each tool result names the call it answers. answers: {an answer's text: {field: the reasoning the
+    server streamed before it}} (OpenAIBackend.answers), sent back with those answers."""
     out = []
     for m, ids in paired(messages):
         role, content = m.get("role"), m.get("content") or ""
@@ -46,6 +47,8 @@ def to_openai(messages):
             if isinstance(kept, dict):
                 entry.update({k: v for k, v in kept.items() if k in REASONING and isinstance(v, str) and v.strip()})
             out.append(entry)
+        elif role == "assistant" and answers and content in answers:
+            out.append({"role": role, "content": content, **answers[content]})
         else:
             out.append({"role": role, "content": content})
     return out
@@ -55,12 +58,20 @@ class OpenAIBackend(RemoteBackend):
     kind = "openai"
     label = "OpenAI-compatible server"
     THINKING = THINKING
+    ANSWERS_KEPT = 64  # answers whose reasoning is kept for later turns
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # An answer's text -> {field: the reasoning streamed before it}. Core keeps no reasoning in the chat, but a
+        # server whose cache needs the history as it generated it (colibri) re-reads the whole chat for a follow-up
+        # unless the last answer's reasoning comes back with it.
+        self.answers = {}
 
     def auth_headers(self, api_key):
         return {"Authorization": "Bearer " + api_key}
 
     def body(self, model, messages, tools, think, options):
-        body = {"model": model, "messages": to_openai(messages), "stream": True,
+        body = {"model": model, "messages": to_openai(messages, self.answers), "stream": True,
                 "stream_options": {"include_usage": True}}
         if tools:
             body["tools"] = tools
@@ -86,6 +97,7 @@ class OpenAIBackend(RemoteBackend):
         """Ollama-shaped chunks from the text of each server-sent event (None for a keepalive comment)."""
         calls, usage, finish, pieces, started, heard = {}, {}, None, 0, None, False
         reasoning, field = [], None  # this reply's reasoning, kept with its tool calls; the field it came in
+        said = []  # its text
         for data in events:
             if data is None:
                 yield {"message": {}}  # a keepalive: nothing to show, but the server can notice a closed page
@@ -111,6 +123,7 @@ class OpenAIBackend(RemoteBackend):
                 field = field or key
             if isinstance(delta.get("content"), str) and delta["content"]:
                 msg["content"] = delta["content"]
+                said.append(delta["content"])
             for part in delta.get("tool_calls") or []:
                 if not isinstance(part, dict):
                     continue
@@ -141,6 +154,12 @@ class OpenAIBackend(RemoteBackend):
             # Kept on the first call (as AnthropicBackend keeps thinking blocks) so to_openai can send it back in the
             # field it came in. Only a server that streamed reasoning gets it back.
             made[0]["reasoning"] = {field: "".join(reasoning)}
+        elif "".join(reasoning).strip() and "".join(said).strip():
+            # An answer: core keeps only its text, which is how to_openai finds the reasoning again (self.answers).
+            self.answers.pop("".join(said), None)
+            self.answers["".join(said)] = {field: "".join(reasoning)}
+            while len(self.answers) > self.ANSWERS_KEPT:
+                del self.answers[next(iter(self.answers))]
         yield {"message": {"tool_calls": made} if made else {}, "done": True,
                "done_reason": "length" if finish == "length" else "stop",
                "eval_count": usage.get("completion_tokens") or pieces,

@@ -15,6 +15,7 @@ sys.path.insert(0, HERE)
 import core  # noqa: E402
 from backends import BackendError, OpenAIBackend  # noqa: E402
 from backends.base import STOPPED, parse_arguments  # noqa: E402
+from backends.openai_chat import to_openai  # noqa: E402
 from stub_server import Reply, Stub, checker, json_reply, sse_reply  # noqa: E402
 
 check, FAILS = checker()
@@ -337,6 +338,31 @@ chunks, req = run(backend, [delta(content="Cool it."), finish()], messages=MESSA
 sent = req["body"]["messages"][2]
 check("streamed as reasoning, sent back as reasoning", sent.get("reasoning") == "Search."
       and "reasoning_content" not in sent, sent)
+
+# ---- an answer's reasoning goes back with it on the next question (smoke test: colibri re-read the whole chat
+# for a follow-up after a thinking turn) ----
+fresh = OpenAIBackend(V1)
+chunks, req = run(fresh, [delta(reasoning_content="Cold water. "), delta(content="\n\nCool it "),
+                          delta(content="for 20 minutes."), finish()])
+answer = "".join(c["message"].get("content") or "" for c in chunks)  # what core keeps as the answer's text
+check("the answer's chunks carry no kept reasoning", all("reasoning" not in c["message"] for c in chunks), chunks)
+later = MESSAGES + [{"role": "assistant", "content": answer}, {"role": "user", "content": "And blisters?"}]
+chunks, req = run(fresh, [delta(content="Leave them."), finish()], messages=later)
+sent = req["body"]["messages"][2]
+check("a follow-up sends the answer back with its reasoning", sent == {
+    "role": "assistant", "content": "\n\nCool it for 20 minutes.", "reasoning_content": "Cold water. "}, sent)
+check("the stored chat itself keeps no reasoning", "reasoning" not in str(later), later)
+chunks, req = run(fresh, [delta(content="x"), finish()], messages=later + [
+    {"role": "assistant", "content": "Leave them."}, {"role": "user", "content": "Ok"}])
+check("an answer streamed without reasoning goes back as it is", req["body"]["messages"][4] == {"role": "assistant", "content": "Leave them."},
+      req["body"]["messages"][4])
+check("an edited answer gets no reasoning", to_openai([{"role": "assistant", "content": "Cool it."}], fresh.answers)
+      == [{"role": "assistant", "content": "Cool it."}])
+for n in range(OpenAIBackend.ANSWERS_KEPT + 5):
+    run(fresh, [delta(reasoning_content="r"), delta(content=f"answer {n}"), finish()])
+check("only the latest answers are kept", len(fresh.answers) == OpenAIBackend.ANSWERS_KEPT
+      and "answer 0" not in fresh.answers and f"answer {OpenAIBackend.ANSWERS_KEPT + 4}" in fresh.answers,
+      len(fresh.answers))
 
 stub.close()
 print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
