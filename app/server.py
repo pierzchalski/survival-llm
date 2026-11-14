@@ -367,6 +367,8 @@ def disk_free_gb(path=None):
 
 
 def system_key():
+    """Which column of CATALOG this computer gets: "mac", else "win", Linux included (the PC builds, not the Mac's
+    -mlx and -nvfp4 tags; the PC sizes, blurbs and PREFERENCE fit a Linux PC as they fit a Windows one)."""
     return "mac" if sys.platform == "darwin" else "win"
 
 
