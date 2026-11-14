@@ -75,6 +75,7 @@ class AnthropicBackend(RemoteBackend):
 
     def __init__(self, base_url, api_key="", model=None, thinking="anthropic", max_tokens=None, caps=None):
         super().__init__(base_url, api_key, model, thinking, max_tokens, caps)
+        self.last_tools = None  # the tool list last sent, for rounds that offer none (body())
 
     def auth_headers(self, api_key):
         return {"x-api-key": api_key}
@@ -86,7 +87,15 @@ class AnthropicBackend(RemoteBackend):
         if system:
             body["system"] = system
         if tools:
-            body["tools"] = to_tools(tools)
+            body["tools"] = self.last_tools = to_tools(tools)
+        elif any(b.get("type") in ("tool_use", "tool_result") for t in turns for b in t["content"]):
+            # A round that offers no tools (the last one, or the app's retries) still has this question's lookups in
+            # it. The reviewer recalls Anthropic's API refusing tool blocks without tools; this keeps the tools
+            # declared but lets the model call none. With no list sent yet, the tools the chat used are declared.
+            body["tools"] = self.last_tools or [
+                {"name": name, "description": "", "input_schema": {"type": "object", "properties": {}}}
+                for name in dict.fromkeys(b["name"] for t in turns for b in t["content"] if b["type"] == "tool_use")]
+            body["tool_choice"] = {"type": "none"}
         thinking = think is not None and self.thinking == "anthropic"
         if thinking and think is False:
             body["thinking"] = {"type": "disabled"}

@@ -180,6 +180,14 @@ check("tool results and the app's note share one user turn", sent[2]["content"] 
     {"type": "tool_result", "tool_use_id": "toolu_01", "content": "ra"},
     {"type": "tool_result", "tool_use_id": made_up, "content": core.BAD_ARGS},
     {"type": "text", "text": core.FINAL_NUDGE}], sent[2])
+check("a round with no tools offered still declares the tools sent before, and lets it call none",
+      req["body"].get("tools") == backend.last_tools and backend.last_tools[0]["name"] == "search_library"
+      and req["body"].get("tool_choice") == {"type": "none"}, {k: req["body"].get(k) for k in ("tools", "tool_choice")})
+chunks, req = run(AnthropicBackend(V1), text("x"), messages=history)
+check("with no tools sent yet, the ones the chat used are declared", [t["name"] for t in req["body"].get("tools", [])]
+      == ["search_library", "read_article"] and req["body"].get("tool_choice") == {"type": "none"}, req["body"])
+chunks, req = run(backend, text("x"))
+check("a chat with no lookups in it sends neither", "tools" not in req["body"] and "tool_choice" not in req["body"])
 chunks, req = run(backend, text("x"), messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "q"},
                                                 {"role": "assistant", "content": ""}, {"role": "user", "content": "q2"}])
 check("an empty answer leaves no empty block, and the users' turns merge",
@@ -252,7 +260,23 @@ check("the result answers toolu_01", second["messages"][2]["content"][0].get("to
       second["messages"][2])
 check("the answer arrives", done["answer"].startswith("Never in a garage."), done["answer"])
 
-core.REASONING_LIMITS = {**core.REASONING_LIMITS, "short": 5}
+# The last round offers no tools, but the chat sent with it holds this question's tool_use and tool_result blocks.
+core.MAX_TOOL_ROUNDS, rounds_before = 1, core.MAX_TOOL_ROUNDS
+core.BACKEND = AnthropicBackend(V1)
+stub.queue("POST", PATH, sse_reply(tool_events[:13] + end("tool_use")))
+stub.queue("POST", PATH, sse_reply(text("Never in a garage.")))
+before = len(stub.requests)
+messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "Can I run a generator in my garage?"}]
+events = list(core.chat_events("claude-x", Lib(), messages, caps={"tools"}))
+sent = [r["body"] for r in stub.requests[before:]]
+has_blocks = [any(b.get("type") in ("tool_use", "tool_result") for m in s["messages"] for b in m["content"]) for s in sent]
+check("the last round sends tool blocks", len(sent) == 2 and has_blocks == [False, True], has_blocks)
+check("and declares tools with tool_choice none", all("tools" in s for s, h in zip(sent, has_blocks) if h)
+      and sent[-1].get("tool_choice") == {"type": "none"}, sent[-1].get("tool_choice"))
+check("and is answered", next(e for e in events if e["type"] == "done")["answer"].startswith("Never in a garage."))
+core.MAX_TOOL_ROUNDS = rounds_before
+
+core.REASONING_LIMITS ={**core.REASONING_LIMITS, "short": 5}
 go_on = threading.Event()
 stub.queue("POST", PATH, sse_reply([start(), block(0, type="thinking", thinking="", signature="")]
                                    + [piece(0, type="thinking_delta", thinking=f"step {i}. ") for i in range(300)],
