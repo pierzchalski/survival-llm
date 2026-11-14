@@ -137,7 +137,9 @@ BAD_ID = "The id must be a number from search_library."
 NO_PASSAGE = "No passage with that id."
 # Models sometimes open an id they never saw (Lightning opened "How to Be an Organized Artist" that way, then cited it).
 UNSEEN_ID = "No search result has that id. Use an id from your search_library results, or answer from what you have."
-TOOL_ERRORS = {BAD_ID, NO_PASSAGE, UNSEEN_ID}
+# Ollama hands over a tool call's arguments already parsed; other servers pass on the model's text, which may not parse.
+BAD_ARGS = 'The arguments of that call were not valid JSON. Call the tool again with a JSON object, like {"query": "water"}.'
+TOOL_ERRORS = {BAD_ID, NO_PASSAGE, UNSEEN_ID, BAD_ARGS}
 KNOWN_ID = re.compile(r"\[id (\d+)\]|read_article\(id=(\d+)\)")  # ids the tools have shown the model
 
 
@@ -153,6 +155,17 @@ def _args(call):
         except ValueError:
             args = {}
     return args if isinstance(args, dict) else {}
+
+
+def _bad_args(call):
+    """Whether a call's arguments are something other than a JSON object (none at all is fine)."""
+    args = call.get("function", {}).get("arguments")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args) if args.strip() else {}
+        except ValueError:
+            return True
+    return args is not None and not isinstance(args, dict)
 
 
 def _used_ids(messages):
@@ -382,7 +395,9 @@ def chat_events(model, library, messages, reasoning="off", caps=None, length="no
                 pid = int(args.get("id"))
             except (TypeError, ValueError):
                 pid = None
-            if fn.get("name") in ("read_article", "show_article") and pid is not None and pid not in known:
+            if _bad_args(call):
+                result, event = BAD_ARGS, None
+            elif fn.get("name") in ("read_article", "show_article") and pid is not None and pid not in known:
                 result, event = UNSEEN_ID, None
             else:
                 result, event = run_tool(library, fn.get("name"), args)
