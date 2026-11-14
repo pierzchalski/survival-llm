@@ -34,8 +34,8 @@ if [ "${1:-}" = "--uninstall" ]; then
 fi
 
 command -v python3 >/dev/null || { echo "Survival LLM needs Python 3. Install it, then run this again." >&2; exit 1; }
-if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
-  echo "Survival LLM needs Python 3.11 or newer; python3 here is $(python3 -V 2>&1). Install a newer one, then run" >&2
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'; then
+  echo "Survival LLM needs Python 3.10 or newer; python3 here is $(python3 -V 2>&1). Install a newer one, then run" >&2
   echo "this again." >&2
   exit 1
 fi

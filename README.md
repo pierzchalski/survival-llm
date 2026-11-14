@@ -32,7 +32,7 @@ your computer and internet speed (the biggest AI model is 80 GB); you only click
 
 **Linux** (from the source code; there is no Linux download yet)
 1. Get the code: `git clone https://github.com/anonnerdfrenzy/survival-llm.git`
-2. Run `survival-llm/packaging/install-linux.sh`. It needs Python 3.11 or newer with its venv module (on Debian and
+2. Run `survival-llm/packaging/install-linux.sh`. It needs Python 3.10 or newer with its venv module (on Debian and
    Ubuntu, `sudo apt install python3-venv`). It adds **Survival LLM** to your app menu and a `survival-llm`
    command. The app gets its own window if your system has WebKitGTK (the script names the packages if it
    doesn't); otherwise it opens in your web browser. To update, `git pull` and run the script again.
