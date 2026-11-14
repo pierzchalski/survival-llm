@@ -50,8 +50,9 @@ your computer and internet speed (the biggest AI model is 80 GB); you only click
 
 ## Uninstall
 
-Delete the app, then these folders: the AI models, in `~/.ollama/models` (shared with any other Ollama on the
-computer, so keep it if you use Ollama elsewhere), and the library. The app's Library window (Search library, then
+Delete the app, then these folders: the AI models, in `~/.ollama/models` (on Linux, `/usr/share/ollama/.ollama/models` if Ollama runs as a system
+service, as Ollama's own installer sets it up; shared with any other Ollama on the computer, so keep it if you use
+Ollama elsewhere), and the library. The app's Library window (Search library, then
 Switch or move the library) shows where the library is: in `~/Survival LLM Library` if you installed it before 0.4, otherwise
 in the app's settings folder unless you moved it. Your own files are in `~/Survival LLM Files` unless you picked
 another folder; keep it if you want them. The app's own settings are in `~/Library/Application Support/Survival LLM`

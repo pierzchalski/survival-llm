@@ -26,9 +26,10 @@ esac
 
 if [ "${1:-}" = "--uninstall" ]; then
   rm -rf "$VENV" "$BIN" "$DESKTOP"
-  echo "Removed the survival-llm command and app menu entry. Your models (~/.ollama/models), library (in"
-  echo "$APP_DIR/Library unless you moved it), files (~/Survival LLM Files unless you moved them) and settings"
-  echo "($APP_DIR) are still there."
+  echo "Removed the survival-llm command and app menu entry. Your models (~/.ollama/models, or"
+  echo "/usr/share/ollama/.ollama/models if Ollama runs as a system service), library (in $APP_DIR/Library"
+  echo "unless you moved it), files (~/Survival LLM Files unless you moved them) and settings ($APP_DIR) are"
+  echo "still there."
   exit 0
 fi
 
