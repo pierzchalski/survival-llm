@@ -36,7 +36,7 @@ import weakref
 import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -293,7 +293,7 @@ def my_name(path):
 
 
 def to_trash(path):
-    """Move a file to the Trash (Mac) or Recycle Bin (Windows), so removing one of their files can be undone."""
+    """Move a file to the Trash (Mac, Linux) or Recycle Bin (Windows), so removing one of their files can be undone."""
     if sys.platform == "darwin":
         try:
             from Foundation import NSURL, NSFileManager  # part of pywebview's macOS dependencies
@@ -312,7 +312,42 @@ def to_trash(path):
         subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], check=True, timeout=60,
                        env={**os.environ, "SURVIVAL_LLM_TRASH": path}, creationflags=0x08000000)  # no console window
     else:
-        os.remove(path)
+        linux_trash(path)
+
+
+def linux_trash(path):
+    """The desktop's own Trash (gio, as the file manager uses), else the freedesktop.org Trash in the home folder.
+    Raises OSError rather than deleting for good, since the page says the file can be got back from the Trash."""
+    if shutil.which("gio"):
+        try:
+            subprocess.run(["gio", "trash", "--", path], check=True, capture_output=True, timeout=60)
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass  # no Trash on that disk, say: do it by hand below
+    trash = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"),
+                         "Trash")
+    os.makedirs(os.path.join(trash, "files"), exist_ok=True)
+    os.makedirs(os.path.join(trash, "info"), exist_ok=True)
+    base, ext = os.path.splitext(os.path.basename(path))
+    name, n = base + ext, 1
+    while True:  # claim a name in info/ first, as the spec asks, so two removals never pick the same one
+        if not os.path.lexists(os.path.join(trash, "files", name)):  # nor overwrite a file left without its info
+            try:
+                fd = os.open(os.path.join(trash, "info", name + ".trashinfo"),
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                break
+            except FileExistsError:
+                pass
+        n += 1
+        name = f"{base}.{n}{ext}"
+    with os.fdopen(fd, "w") as f:
+        f.write(f"[Trash Info]\nPath={quote(os.path.abspath(path))}\n"
+                f"DeletionDate={datetime.datetime.now():%Y-%m-%dT%H:%M:%S}\n")
+    try:
+        shutil.move(path, os.path.join(trash, "files", name))
+    except OSError:
+        os.remove(os.path.join(trash, "info", name + ".trashinfo"))
+        raise
 
 
 def open_folder(path):

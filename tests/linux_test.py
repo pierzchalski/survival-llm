@@ -1,5 +1,5 @@
-"""Linux: the AI engine (an ollama on PATH, or one answering at OLLAMA_HOST, and plain words when there is neither),
-the models it offers, and updates.
+"""Linux: the Trash (never a delete for good), the AI engine (an ollama on PATH, or one answering at OLLAMA_HOST, and
+plain words when there is neither), the models it offers, and updates.
 No Ollama: a stand-in answers at OLLAMA_HOST, and a stand-in ollama command is put on PATH. Nothing is downloaded.
 
 Usage: .venv/bin/python tests/linux_test.py"""
@@ -79,6 +79,69 @@ def command(folder, name, script):
 
 
 bin_dir = os.path.join(TMP, "bin")  # stand-in programs
+
+# ---------- removing one of their files puts it in the Trash, never deletes it for good ----------
+TRASH = os.path.join(TMP, "data", "Trash")
+if shutil.which("gio"):  # the desktop's own Trash; the file and the Trash are both in TMP, so it is the one in TMP
+    doomed =write(os.path.join(TMP, "files", "gio plan.txt"), "meet at the library")
+    try:
+        server.to_trash(doomed)
+        trashed = os.listdir(os.path.join(TRASH, "files"))
+    except Exception as exc:
+        trashed = repr(exc)
+    check("gio: the file goes to the Trash", not os.path.exists(doomed) and trashed == ["gio plan.txt"], trashed)
+    shutil.rmtree(TRASH, ignore_errors=True)
+else:
+    print("SKIP gio trash (no gio here)")
+
+os.environ["PATH"] = ""  # no gio: the freedesktop.org Trash, by hand
+try:
+    for n in range(2):
+        server.to_trash(write(os.path.join(TMP, "files", "my plan.txt"), f"copy {n}"))
+finally:
+    os.environ["PATH"] = PATH
+check("no gio: removed files are in the Trash, the second under a name of its own",
+      not os.path.exists(os.path.join(TMP, "files", "my plan.txt"))
+      and sorted(os.listdir(os.path.join(TRASH, "files"))) == ["my plan.2.txt", "my plan.txt"],
+      os.listdir(os.path.join(TRASH, "files")) if os.path.isdir(os.path.join(TRASH, "files")) else None)
+with open(os.path.join(TRASH, "files", "my plan.txt")) as f:
+    check("no gio: the first one is the first file", f.read() == "copy 0")
+with open(os.path.join(TRASH, "info", "my plan.txt.trashinfo")) as f:
+    info = f.read().splitlines()
+check("no gio: the Trash knows where it came from (for Restore)", info[0] == "[Trash Info]"
+      and info[1] == "Path=" + os.path.join(TMP, "files", "my%20plan.txt") and info[2].startswith("DeletionDate="), info)
+
+write(os.path.join(TRASH, "files", "notes.txt"), "a file in the Trash without its info")
+os.environ["PATH"] = ""
+try:
+    server.to_trash(write(os.path.join(TMP, "files", "notes.txt"), "new"))
+finally:
+    os.environ["PATH"] = PATH
+with open(os.path.join(TRASH, "files", "notes.txt")) as f:
+    check("no gio: a file already in the Trash isn't overwritten", f.read() == "a file in the Trash without its info"
+          and os.path.exists(os.path.join(TRASH, "files", "notes.2.txt")))
+
+command(bin_dir, "gio", "exit 1\n")
+os.environ["PATH"] = bin_dir
+try:
+    server.to_trash(write(os.path.join(TMP, "files", "list.txt"), "x"))
+finally:
+    os.environ["PATH"] = PATH
+check("gio fails (no Trash on that disk, say): the Trash by hand instead",
+      os.path.exists(os.path.join(TRASH, "files", "list.txt")))
+os.remove(os.path.join(bin_dir, "gio"))
+
+keep = write(os.path.join(TMP, "files", "keep.txt"), "keep me")
+not_a_folder = write(os.path.join(TMP, "a-file"), "")
+os.environ.update(PATH="", XDG_DATA_HOME=not_a_folder)  # no Trash can be made there
+try:
+    server.to_trash(keep)
+    refused = None
+except OSError as exc:
+    refused = exc
+finally:
+    os.environ.update(PATH=PATH, XDG_DATA_HOME=os.path.join(TMP, "data"))
+check("no Trash at all: says so, and the file is still there", refused is not None and os.path.exists(keep), refused)
 
 # ---------- the AI engine: an Ollama answering at OLLAMA_HOST is used, with no ollama command needed ----------
 real_locations, real_start = server.ollama_locations, server.start_ollama
