@@ -340,12 +340,12 @@ def linux_trash(path):
                 pass
         n += 1
         name = f"{base}.{n}{ext}"
-    with os.fdopen(fd, "w") as f:
-        f.write(f"[Trash Info]\nPath={quote(os.path.abspath(path))}\n"
-                f"DeletionDate={datetime.datetime.now():%Y-%m-%dT%H:%M:%S}\n")
     try:
+        with os.fdopen(fd, "w") as f:
+            f.write(f"[Trash Info]\nPath={quote(os.fsencode(os.path.abspath(path)))}\n"
+                    f"DeletionDate={datetime.datetime.now():%Y-%m-%dT%H:%M:%S}\n")
         shutil.move(path, os.path.join(trash, "files", name))
-    except OSError:
+    except BaseException:
         os.remove(os.path.join(trash, "info", name + ".trashinfo"))
         raise
 

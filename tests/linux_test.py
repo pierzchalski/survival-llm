@@ -121,6 +121,23 @@ with open(os.path.join(TRASH, "files", "notes.txt")) as f:
     check("no gio: a file already in the Trash isn't overwritten", f.read() == "a file in the Trash without its info"
           and os.path.exists(os.path.join(TRASH, "files", "notes.2.txt")))
 
+odd_name = os.fsdecode(b"caf\xe9.txt")  # not UTF-8: os.listdir gives such a name as surrogate escapes
+odd = write(os.path.join(TMP, "files", odd_name), "odd name")
+os.environ["PATH"] = ""
+try:
+    server.to_trash(odd)
+    refused = None
+except Exception as exc:
+    refused = exc
+finally:
+    os.environ["PATH"] = PATH
+odd_info_path = os.path.join(TRASH, "info", odd_name + ".trashinfo")
+odd_info = open(odd_info_path, encoding="ascii").read().splitlines() if os.path.exists(odd_info_path) else None
+check("no gio: a name that isn't UTF-8 goes to the Trash, its path in the info file as percent-encoded bytes",
+      refused is None and not os.path.exists(odd) and os.path.exists(os.path.join(TRASH, "files", odd_name))
+      and odd_info is not None and odd_info[1] == "Path=" + os.path.join(TMP, "files", "caf%E9.txt"),
+      (refused, odd_info))
+
 command(bin_dir, "gio", "exit 1\n")
 os.environ["PATH"] = bin_dir
 try:
