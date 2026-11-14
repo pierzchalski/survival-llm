@@ -99,7 +99,21 @@ check("anthropic from backend.json", isinstance(b, AnthropicBackend) and b.base_
 b = from_config(OLLAMA, {"SURVIVAL_LLM_BASE_URL": "http://127.0.0.1:9200"}, path)
 check("an environment variable overrides one setting", isinstance(b, AnthropicBackend)
       and b.base_url == "http://127.0.0.1:9200/v1", repr(b))
+b = from_config(OLLAMA, {"SURVIVAL_LLM_BACKEND": "ollama"}, path)
+check("SURVIVAL_LLM_BACKEND=ollama wins over a backend.json naming another server",
+      isinstance(b, OllamaBackend) and b.base_url == OLLAMA, repr(b))
+b = from_config(OLLAMA, {"SURVIVAL_LLM_BACKEND": "openai", "SURVIVAL_LLM_BASE_URL": "h:2"}, path)
+check("another remote backend from the environment takes nothing from the file", isinstance(b, OpenAIBackend)
+      and b.base_url == "http://h:2/v1" and b.client.scrub(KEY) == KEY and b.capabilities("x") == {"tools"}, repr(b))
+b = from_config(OLLAMA, {"SURVIVAL_LLM_BACKEND": "Anthropic"}, path)
+check("the file's own backend from the environment still takes the file's settings", isinstance(b, AnthropicBackend)
+      and b.base_url == "http://127.0.0.1:9100/v1" and b.client.scrub(KEY) == "[key]", repr(b))
+check("one remote setting with ollama: 'is'", "base_url is for" in (refused({"SURVIVAL_LLM_BASE_URL": "x:1"}) or ""))
+check("two: 'are'", "base_url, model are for" in (refused({"SURVIVAL_LLM_BASE_URL": "x:1", "SURVIVAL_LLM_MODEL": "m"})
+                                                 or ""))
 os.chmod(path, 0o644)
+check("a file set aside isn't checked", isinstance(from_config(OLLAMA, {"SURVIVAL_LLM_BACKEND": "ollama"}, path),
+                                                   OllamaBackend))
 said = refused(path=path)
 check("a key file others can read is refused", said is not None and "chmod 600" in said and KEY not in said, said)
 check("a file without a key may be readable", isinstance(from_config(OLLAMA, {}, write(

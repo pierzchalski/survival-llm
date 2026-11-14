@@ -1,6 +1,8 @@
 """Which server answers: Ollama unless configured otherwise.
 
-Settings come from backend.json in the app's settings folder, and environment variables override them one by one:
+Settings come from backend.json in the app's settings folder, and environment variables override them one by one
+(SURVIVAL_LLM_BACKEND naming another backend than the file's sets the whole file aside, so SURVIVAL_LLM_BACKEND=ollama
+always gives Ollama):
 
   backend.json      environment variable            meaning
   "backend"         SURVIVAL_LLM_BACKEND            ollama (default), openai or anthropic
@@ -75,9 +77,11 @@ def normalise_base(url):
 
 
 def settings(env=None, path=None):
-    """The settings as a dict: backend.json, then the environment over it."""
+    """The settings as a dict: backend.json, then the environment over it. When the environment names a different
+    backend from the file's, the file is left out altogether: its settings are for another server."""
     env = os.environ if env is None else env
     path = path or os.path.join(app_dir(env), "backend.json")
+    from_env = {f: env[f"SURVIVAL_LLM_{f.upper()}"] for f in FIELDS if env.get(f"SURVIVAL_LLM_{f.upper()}")}
     found = {}
     if os.path.exists(path):
         try:
@@ -87,12 +91,14 @@ def settings(env=None, path=None):
             raise ConfigError(f"Can't read {path}: {getattr(exc, 'strerror', None) or exc}") from None
         if not isinstance(found, dict):
             raise ConfigError(f"{path} must hold a JSON object")
+        kind = lambda conf: str(conf.get("backend") or "ollama").strip().lower()  # noqa: E731
+        if "backend" in from_env and kind(from_env) != kind(found):
+            return from_env
         unknown = sorted(set(found) - set(FIELDS))
         if unknown:
             raise ConfigError(f"{path} has settings this version doesn't know: {', '.join(unknown)}")
         if found.get("api_key") and os.name != "nt" and os.stat(path).st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             raise ConfigError(f"{path} holds an API key but other users can read it. Run: chmod 600 '{path}'")
-    from_env = {f: env[f"SURVIVAL_LLM_{f.upper()}"] for f in FIELDS if env.get(f"SURVIVAL_LLM_{f.upper()}")}
     if {"api_key", "api_key_file"} & set(from_env):  # a key from the environment replaces the file's
         found = {k: v for k, v in found.items() if k not in ("api_key", "api_key_file")}
     return {**found, **from_env}
@@ -117,8 +123,8 @@ def from_config(ollama_url, env=None, path=None):
     if kind == "ollama":
         extra = sorted(f for f in FIELDS if f != "backend" and conf.get(f) not in (None, ""))
         if extra:
-            raise ConfigError(f"{', '.join(extra)} are for the openai and anthropic backends; Ollama's address is "
-                              "set with OLLAMA_HOST")
+            raise ConfigError(f"{', '.join(extra)} {'is' if len(extra) == 1 else 'are'} for the openai and anthropic "
+                              "backends only; Ollama's address is set with OLLAMA_HOST")
         return OllamaBackend(ollama_url)
     base = normalise_base(conf.get("base_url"))
     if not base:
