@@ -5,6 +5,8 @@ The chat loop in core.py reads the model's answer as Ollama's /api/chat chunks: 
 (nanoseconds). Each backend turns its own wire format into those chunks, so the chat loop and its tests stay the same
 whichever server answers.
 """
+import json
+import re
 from dataclasses import dataclass
 
 
@@ -42,3 +44,44 @@ class Backend:
     def family_hint(self, model):
         """Text naming the model's family, for core.family() when the model's name doesn't say; "" if unknown."""
         return ""
+
+
+def parse_arguments(text):
+    """A tool call's arguments as a dict. Fixes slips models make in the JSON they write (a code fence around it, a
+    comma before a closing bracket, words before or after it), the same tricks core.memory_plan uses. Returns the
+    text unchanged when it still isn't a JSON object, so core can answer the call with BAD_ARGS."""
+    if isinstance(text, dict):
+        return text
+    if not isinstance(text, str) or not text.strip():
+        return {}
+    unfenced = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", text)
+    for attempt in (text, unfenced, re.sub(r",\s*([}\]])", r"\1", unfenced)):
+        start = attempt.find("{")  # only the first object: one nested in a cut-off call is not the call
+        try:
+            found = json.JSONDecoder().raw_decode(attempt, start)[0] if start >= 0 else None
+        except ValueError:
+            continue
+        if isinstance(found, dict):
+            return found
+    return text
+
+
+def paired(messages):
+    """Each message with the wire ids that go with it, as (message, ids): for an assistant message, a list with one id
+    per tool call (the id the server gave, else a made-up one); for a tool result, the id of the call it answers,
+    pairing results with calls in order as core._used_ids does (None when there is no call left to answer); else
+    None. The stored chat keeps Ollama's shape, which has no ids."""
+    pending, made = [], 0
+    for m in messages:
+        role = m.get("role")
+        if role == "assistant":
+            ids = []
+            for call in m.get("tool_calls") or []:
+                made += 1
+                ids.append(str(call.get("id") or f"call_sllm_{made}"))
+            pending = list(ids)
+            yield m, ids
+        elif role == "tool":
+            yield m, pending.pop(0) if pending else None
+        else:
+            yield m, None
