@@ -54,7 +54,7 @@ def corrected_tail(shown, answer):
     passage ids): (text, replaced). When shown is the start of the answer, text is the rest of it; otherwise it is
     the answer from the first line that differs, and replaced is True."""
     shown, answer = shown.strip(), answer.strip()
-    if answer == shown:
+    if answer == shown or answer.split() == shown.split():  # core only moved a Sources line onto its own line
         return "", False
     if answer.startswith(shown):
         return answer[len(shown):], False

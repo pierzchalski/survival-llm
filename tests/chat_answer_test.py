@@ -107,11 +107,19 @@ printed, _ = turn("Please look it up: how do I treat a burn?",
 check("after a retry: ends with the answer it gave, uncorrected", answer_part(printed).strip().endswith(good)
       and "corrected" not in printed, printed)
 
+# A Sources line the model wrote inline is only moved onto its own line by core: nothing was corrected
+printed, _ = turn("How do I treat a burn?", [call("search_library", query="burn"), call("read_article", id=1403312),
+                                             say("Cool it under running water for 20 minutes. Sources: Burns (MedlinePlus)")])
+check("inline Sources line: core only moves it, so no correction note", "corrected" not in printed, printed)
+check("inline Sources line: the answer is printed once", printed.count("Cool it under running water") == 1, printed)
+
 # corrected_tail itself
 check("tail: same text", chat.corrected_tail("A.\n\nSources: X", "A.\n\nSources: X") == ("", False))
 check("tail: an added line", chat.corrected_tail("A.", "A.\n\nSources: X") == ("\n\nSources: X", False))
 check("tail: a replaced line starts at its line", chat.corrected_tail("A.\nB.\n\nSources: Y, Z", "A.\nB.\n\nSources: X")
       == ("Sources: X", True), chat.corrected_tail("A.\nB.\n\nSources: Y, Z", "A.\nB.\n\nSources: X"))
+check("tail: a change in whitespace only is no change", chat.corrected_tail("A. Sources: X", "A.\n\nSources: X") == ("", False),
+      chat.corrected_tail("A. Sources: X", "A.\n\nSources: X"))
 check("tail: a change in the first line gives the whole answer", chat.corrected_tail("Boil it 1 min (id 1403312).",
       "Boil it 1 min.") == ("Boil it 1 min.", True))
 
