@@ -364,6 +364,42 @@ check("only the latest answers are kept", len(fresh.answers) == OpenAIBackend.AN
       and "answer 0" not in fresh.answers and f"answer {OpenAIBackend.ANSWERS_KEPT + 4}" in fresh.answers,
       len(fresh.answers))
 
+# ---- the last round, which offers no tools, still declares them (smoke test: without them colibri re-read the
+# whole chat, 383 s for 7243 tokens) ----
+def search_call(call_id):
+    return delta(tool_calls=[{"index": 0, "id": call_id, "type": "function",
+                              "function": {"name": "search_library", "arguments": '{"query": "generator"}'}}])
+
+
+core.MAX_TOOL_ROUNDS, rounds_before = 1, core.MAX_TOOL_ROUNDS
+core.BACKEND = OpenAIBackend(V1)
+stub.queue("POST", PATH, sse_reply([search_call("c20"), finish("tool_calls")]))
+stub.queue("POST", PATH, sse_reply([delta(content="Never in a garage."), finish()]))
+before = len(stub.requests)
+messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "Can I run a generator in my garage?"}]
+events = list(core.chat_events("qwen3-8b", Lib(), messages, caps={"tools"}))
+last = stub.requests[-1]["body"]
+check("two requests", len(stub.requests) - before == 2, len(stub.requests) - before)
+check("the last round is core's no-tools round", last["messages"][-1] == {"role": "user", "content": core.FINAL_NUDGE},
+      last["messages"][-1])
+check("and still declares the tools the first round sent, with no tool_choice",
+      last.get("tools") == core.TOOLS and "tool_choice" not in last, {k: last.get(k) for k in ("tools", "tool_choice")})
+# A call made anyway on that round is not run
+stub.queue("POST", PATH, sse_reply([search_call("c21"), finish("tool_calls")]))
+stub.queue("POST", PATH, sse_reply([delta(content="Outdoors only. "), search_call("c22"), finish("tool_calls")]))
+before = len(stub.requests)
+messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "Can I run a generator in my garage?"}]
+events = list(core.chat_events("qwen3-8b", Lib(), messages, caps={"tools"}))
+check("a call on the last round isn't run", [e["type"] for e in events].count("search") == 1
+      and len(stub.requests) - before == 2, [e["type"] for e in events])
+check("and the answer it wrote is the answer", next(e for e in events if e["type"] == "done")["answer"]
+      .startswith("Outdoors only."), events[-1])
+core.MAX_TOOL_ROUNDS = rounds_before
+chunks, req = run(core.BACKEND, [delta(content="x"), finish()])
+check("a chat with no lookups in it gets no tools", "tools" not in req["body"], req["body"])
+chunks, req = run(OpenAIBackend(V1), [delta(content="x"), finish()], messages=messages)
+check("with no tools sent yet, none are made up", "tools" not in req["body"], req["body"])
+
 stub.close()
 print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
 sys.exit(1 if FAILS else 0)

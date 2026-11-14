@@ -66,6 +66,7 @@ class OpenAIBackend(RemoteBackend):
         # server whose cache needs the history as it generated it (colibri) re-reads the whole chat for a follow-up
         # unless the last answer's reasoning comes back with it.
         self.answers = {}
+        self.last_tools = None  # the tool list last sent, for rounds that offer none (body())
 
     def auth_headers(self, api_key):
         return {"Authorization": "Bearer " + api_key}
@@ -74,7 +75,14 @@ class OpenAIBackend(RemoteBackend):
         body = {"model": model, "messages": to_openai(messages, self.answers), "stream": True,
                 "stream_options": {"include_usage": True}}
         if tools:
-            body["tools"] = tools
+            body["tools"] = self.last_tools = tools
+        elif self.last_tools and any(m.get("tool_calls") for m in body["messages"]):
+            # core offers no tools on its last round, after the reasoning cap and in _rescue, while this question's
+            # lookups are still in the chat. The tools go out again: a server that writes them into the prompt's
+            # first message (colibri, for Qwen) otherwise sees a different prompt and reads the whole chat again.
+            # Not with tool_choice "none": colibri leaves the tools out of the prompt for that too. core runs no call
+            # made on such a round.
+            body["tools"] = self.last_tools
         if self.max_reply(options):
             body["max_tokens"] = self.max_reply(options)
         for field in ("temperature", "top_p"):
