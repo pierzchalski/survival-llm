@@ -52,9 +52,18 @@ check("Ollama with remote settings is refused", "OLLAMA_HOST" in (refused({"SURV
 # ---- addresses ----
 for given, want in (("127.0.0.1:8000", "http://127.0.0.1:8000/v1"), ("http://h:1/v1/", "http://h:1/v1"),
                     ("http://h:1/v1/chat/completions", "http://h:1/v1"), ("https://api.example.com", "https://api.example.com/v1"),
-                    ("http://h:1/v1/messages", "http://h:1/v1"), ("http://h/prefix", "http://h/prefix/v1"),
+                    ("http://h:1/v1/messages", "http://h:1/v1"), ("http://h/prefix", "http://h/prefix"),
                     ("http://[::1]:8000", "http://[::1]:8000/v1"), ("http://user:pw@h:1", ""), ("ftp://h", ""), ("", "")):
     check(f"normalise_base({given!r})", normalise_base(given) == want, normalise_base(given))
+# /v1 only for a bare address; a path is used as given, so APIs elsewhere than /v1 can be reached.
+for given, want in (("http://h:1/", "http://h:1/v1"), ("https://g.example.com/v1beta/openai/", "https://g.example.com/v1beta/openai"),
+                    ("https://g.example.com/v1beta/openai/chat/completions", "https://g.example.com/v1beta/openai"),
+                    ("https://root.example.com/chat/completions", "https://root.example.com"),
+                    ("https://root.example.com/models", "https://root.example.com"), ("http://h:1/api/v2", "http://h:1/api/v2")):
+    check(f"normalise_base({given!r})", normalise_base(given) == want, normalise_base(given))
+for given in ("https://x.example.com/openai?api-version=2024-01-01", f"http://h:1/v1?key={KEY}", "http://h:1/v1#frag", "h:1?"):
+    said = refused({"SURVIVAL_LLM_BACKEND": "openai", "SURVIVAL_LLM_BASE_URL": given})
+    check(f"a query string is refused: {given[:30]!r}", said is not None and "query string" in said and KEY not in said, said)
 
 # ---- from the environment ----
 env = {"SURVIVAL_LLM_BACKEND": "openai", "SURVIVAL_LLM_BASE_URL": "127.0.0.1:8000", "SURVIVAL_LLM_API_KEY": KEY,

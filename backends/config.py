@@ -51,20 +51,27 @@ def app_dir(env=None):
 
 
 def normalise_base(url):
-    """http(s)://host:port/.../v1 from what the person wrote: "host:port", a trailing slash, or a full endpoint URL.
-    "" when it isn't an http(s) address with a plain host (no user name or password in it)."""
-    url = str(url or "").strip().rstrip("/")
+    """The address requests go under ("{base}/chat/completions", "{base}/models"), from what the person wrote. A bare
+    "host:port" or "http://host:port" gets /v1, the usual place. An address with a path is used as given, less a
+    trailing slash or an endpoint ("/chat/completions", "/messages", "/models"); so a server whose API sits at the
+    root is given as its full endpoint, e.g. "https://example.com/chat/completions". "" when it isn't an http(s)
+    address with a plain host (no user name or password in it). A query string is refused: none would be sent."""
+    url = str(url or "").strip()
+    if "?" in url or "#" in url:
+        raise ConfigError("base_url can't have a query string (?...) or #...: the app would not send it. Give the "
+                          "address without it")
+    url = url.rstrip("/")
     if url and not re.match(r"(?i)^https?://", url):
         url = "http://" + url
     parts = urlsplit(url)
     if parts.scheme.lower() not in ("http", "https") or not HOST_PORT.fullmatch(parts.netloc):
         return ""
-    path = parts.path
+    path, endpoint = parts.path, False
     for tail in ("/chat/completions", "/completions", "/messages", "/models"):
         if path.endswith(tail):
-            path = path[:-len(tail)]
+            path, endpoint = path[:-len(tail)], True
             break
-    return f"{parts.scheme.lower()}://{parts.netloc}{path if path.endswith('/v1') else path + '/v1'}"
+    return f"{parts.scheme.lower()}://{parts.netloc}{path or ('' if endpoint else '/v1')}"
 
 
 def settings(env=None, path=None):
