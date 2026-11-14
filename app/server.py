@@ -40,7 +40,15 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from core import HOST, capabilities, chat_events, installed_models, system_prompt, trim  # noqa: E402
+from backends import ConfigError  # noqa: E402
+try:
+    from core import BACKEND, HOST, capabilities, chat_events, installed_models, system_prompt, trim  # noqa: E402
+except ConfigError as exc:  # backend.json or a SURVIVAL_LLM_* variable (backends/config.py)
+    sys.exit(f"Survival LLM can't start: the AI server settings can't be used: {exc}")
+if BACKEND.kind != "ollama":  # setup and model downloads below still assume Ollama
+    sys.exit(f"Survival LLM can't start: the settings choose {BACKEND.label} at {BACKEND.base_url}, and the app window "
+             "works only with Ollama so far. Use chat.py to talk to that server, or remove SURVIVAL_LLM_BACKEND and "
+             "backend.json to use Ollama.")
 from library import myfiles, search  # noqa: E402
 from memory import MAX_CHARS as MEMORY_MAX, Memory, parse as parse_notes, prompt_section, size as notes_size  # noqa: E402
 from library.search import DB_PATH, LIB, TOPICS, Library  # noqa: E402

@@ -14,7 +14,9 @@ Settings come from backend.json in the app's settings folder, and environment va
   "caps"            SURVIVAL_LLM_CAPS               what the model can do: "tools,thinking", "tools" or "none"
 
 Everything but "backend" is for openai and anthropic: Ollama's address stays OLLAMA_HOST. The settings are read once,
-when the app starts. A backend.json holding an api_key must not be readable by other users (chmod 600).
+when core.py is imported. Only the terminal chat (chat.py) can use openai or anthropic so far: the app window
+(app/server.py) refuses to start with them. A backend.json holding an api_key must not be readable by other users
+(chmod 600).
 """
 import json
 import os
