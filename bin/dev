@@ -142,6 +142,10 @@ def main():
             sys.exit("--test takes no-answer or think-limit=N, for example --test think-limit=60")
     if set(args) - {"--fresh", "--new-user", "--keep", "--release", "--rebuild", "--own-engine", "stop", "reset", "log"}:
         sys.exit(__doc__)
+    if sys.platform != "darwin":  # it builds and opens a Mac app (packaging/build.sh dev, open -a)
+        sys.exit("bin/dev builds and opens the Mac app, so it only works on a Mac. To try the code in this folder "
+                 "elsewhere, run it directly with settings of its own:\n"
+                 "  SURVIVAL_LLM_DEV=1 SURVIVAL_LLM_APP_DIR=~/.survival-llm-dev python3 app/server.py")
     if "log" in args:
         os.execvp("tail", ["tail", "-n", "40", "-f", LOGS[DEV_APP]])
     if "stop" in args or "reset" in args:
