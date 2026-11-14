@@ -1,5 +1,5 @@
 """Linux: the Trash (never a delete for good), the AI engine (an ollama on PATH, or one answering at OLLAMA_HOST, and
-plain words when there is neither), the models it offers, and updates.
+plain words when there is neither), the models it offers, updates, and keeping the computer awake during setup.
 No Ollama: a stand-in answers at OLLAMA_HOST, and a stand-in ollama command is put on PATH. Nothing is downloaded.
 
 Usage: .venv/bin/python tests/linux_test.py"""
@@ -196,6 +196,35 @@ check("no update is offered for Linux", server.platform_key() is None and server
 check("and why it can't update itself names git pull", server.DEV is not None
       or "git pull" in (server.update_blocker() or ""), server.update_blocker())
 
+# ---------- kept awake while setup downloads: systemd-inhibit, for as long as the download runs ----------
+real_which, real_popen = server.shutil.which, server.subprocess.Popen
+calls = []
+
+
+class FakeProc:
+    def __init__(self, cmd, **kwargs):
+        calls.append(cmd)
+
+    def terminate(self):
+        calls.append("terminated")
+
+
+server.shutil.which = lambda name: "/usr/bin/systemd-inhibit" if name == "systemd-inhibit" else None
+server.subprocess.Popen = FakeProc
+try:
+    let_sleep = server.keep_awake()
+    held = list(calls)
+    let_sleep()
+finally:
+    server.shutil.which, server.subprocess.Popen = real_which, real_popen
+check("keep awake: systemd-inhibit holds off sleep, tied to this app's life",
+      held and held[0][:2] == ["systemd-inhibit", "--what=idle:sleep"] and f"--pid={os.getpid()}" in held[0], held)
+check("keep awake: let go when the download ends", calls[-1] == "terminated", calls)
+server.shutil.which = lambda name: None
+try:
+    check("keep awake without systemd: nothing to do", server.keep_awake()() is None)
+finally:
+    server.shutil.which = real_which
 
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n{'FAILED: ' + ', '.join(FAILS) if FAILS else 'all Linux checks passed'}")

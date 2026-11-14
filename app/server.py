@@ -1224,6 +1224,15 @@ def keep_awake():
     if os.name == "nt":  # for this thread, which runs the whole setup
         ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
         return lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+    if shutil.which("systemd-inhibit"):  # Linux with systemd: hold off idle sleep until this lets go (or the app ends)
+        try:
+            proc = subprocess.Popen(["systemd-inhibit", "--what=idle:sleep", "--who=Survival LLM",
+                                     "--why=Downloading the AI model or library", "--mode=block",
+                                     "tail", f"--pid={os.getpid()}", "-f", "/dev/null"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            return lambda: None
+        return proc.terminate
     return lambda: None
 
 
