@@ -76,12 +76,12 @@ class OpenAIBackend(RemoteBackend):
                 "stream_options": {"include_usage": True}}
         if tools:
             body["tools"] = self.last_tools = tools
-        elif self.last_tools and any(m.get("tool_calls") for m in body["messages"]):
-            # core offers no tools on its last round, after the reasoning cap and in _rescue, while this question's
-            # lookups are still in the chat. The tools go out again: a server that writes them into the prompt's
-            # first message (colibri, for Qwen) otherwise sees a different prompt and reads the whole chat again.
-            # Not with tool_choice "none": colibri leaves the tools out of the prompt for that too. core runs no call
-            # made on such a round.
+        elif self.last_tools and len(messages) > 1 and messages[-2].get("role") == "tool":
+            # core offers no tools on its last round, which is a tool result followed by the app's note. The tools go
+            # out again: a server that writes them into the prompt's first message (colibri, for Qwen) otherwise sees
+            # a different prompt and reads the whole chat again. Not on _rescue (the message before the last is the
+            # failed answer), where core says "without tools". Not with tool_choice "none": colibri leaves the tools
+            # out of the prompt for that too. core runs no call made on such a round.
             body["tools"] = self.last_tools
         if self.max_reply(options):
             body["max_tokens"] = self.max_reply(options)

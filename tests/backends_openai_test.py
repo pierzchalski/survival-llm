@@ -394,6 +394,19 @@ check("a call on the last round isn't run", [e["type"] for e in events].count("s
       and len(stub.requests) - before == 2, [e["type"] for e in events])
 check("and the answer it wrote is the answer", next(e for e in events if e["type"] == "done")["answer"]
       .startswith("Outdoors only."), events[-1])
+# A call on the last round leaves no answer, so core asks once more in _rescue: that request carries no tools
+stub.queue("POST", PATH, sse_reply([search_call("c23"), finish("tool_calls")]))
+stub.queue("POST", PATH, sse_reply([search_call("c24"), finish("tool_calls")]))
+stub.queue("POST", PATH, sse_reply([delta(content="Outdoors only."), finish()]))
+before = len(stub.requests)
+messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "Can I run a generator in my garage?"}]
+events = list(core.chat_events("qwen3-8b", Lib(), messages, caps={"tools"}))
+rescue = stub.requests[-1]["body"]
+check("three requests: a lookup, a dropped call, the rescue", len(stub.requests) - before == 3,
+      len(stub.requests) - before)
+check("the last request is _rescue's", rescue["messages"][-1]["content"].startswith(core.RESCUE_NOTE),
+      rescue["messages"][-1])
+check("_rescue's request carries no tools", "tools" not in rescue, rescue.get("tools"))
 core.MAX_TOOL_ROUNDS = rounds_before
 chunks, req = run(core.BACKEND, [delta(content="x"), finish()])
 check("a chat with no lookups in it gets no tools", "tools" not in req["body"], req["body"])
