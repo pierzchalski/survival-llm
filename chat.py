@@ -1,6 +1,7 @@
 """Terminal chat with a local model that can search the offline library.
 
 Usage: chat.py [--model NAME] [question ...]   (default: the first chat model Ollama has)
+To use another server than Ollama, see backends/config.py (SURVIVAL_LLM_BACKEND, SURVIVAL_LLM_BASE_URL, ...).
 With a question it answers once and exits; without one it opens a chat.
 In a chat: /sources lists what the last answer used, /open N opens one, /reasoning shows its reasoning, /new,
 /think off|short|medium|long|none sets how much it may reason before answering, /limit normal|long|none sets how long
@@ -12,8 +13,14 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from core import LENGTH_LIMITS, REASONING_LIMITS, capabilities, chat_events, installed_models, system_prompt, trim  # noqa: E402
+from backends import BackendError, ConfigError  # noqa: E402
+try:
+    from core import (BACKEND, LENGTH_LIMITS, REASONING_LIMITS, capabilities, chat_events, installed_models,  # noqa: E402
+                      system_prompt, trim)
+except ConfigError as exc:
+    sys.exit(f"The AI server settings can't be used: {exc}")
 from library.search import DB_PATH, Library  # noqa: E402
+OLLAMA = BACKEND.kind == "ollama"
 
 DIM, BOLD, RESET = "\033[2m", "\033[1m", "\033[0m"
 
@@ -100,7 +107,8 @@ def main():
     if not model:
         names = [m for m in installed_models() or [] if not any(x in m for x in ("embed", "bge-", "nomic", "minilm"))]
         if not names:
-            sys.exit("No AI model found. Start Ollama, download a model (ollama pull granite4.2:8b), or use --model.")
+            sys.exit("No AI model found. Start Ollama, download a model (ollama pull granite4.2:8b), or use --model."
+                     if OLLAMA else f"No AI model found at {BACKEND.base_url}: is the server running? Or use --model.")
         model = names[0]
     library = None
     if os.path.exists(DB_PATH):
@@ -125,7 +133,8 @@ def main():
         pass
     docs, n_sources = library.stats() if library else (0, 0)
     lib_note = f"library: {docs:,} articles from {n_sources} sources" if library else "no library found"
-    print(f"{BOLD}{model.removesuffix(':latest')}{RESET} {DIM}· offline · {lib_note}{RESET}")
+    where = "offline" if OLLAMA else f"{BACKEND.label} at {BACKEND.base_url}"
+    print(f"{BOLD}{model.removesuffix(':latest')}{RESET} {DIM}· {where} · {lib_note}{RESET}")
     print(f"{DIM}Ask anything. /sources shows what the last answer read, /open N opens one, /reasoning shows how it "
           f"reasoned, /new starts over, /think sets how much it may reason, /limit sets the answer length limit, /bye quits.{RESET}")
     last_sources, last_reasoning = [], ""
@@ -187,8 +196,11 @@ def main():
             last_sources = used or last_sources
         except KeyboardInterrupt:
             print(f"\n{DIM}[stopped]{RESET}")
+        except BackendError as exc:
+            print(f"\n{DIM}[{exc}]{RESET}")
         except OSError as exc:
-            print(f"\n{DIM}[could not reach the local model: {exc}. Is Ollama running? Try: ollama serve]{RESET}")
+            print(f"\n{DIM}[could not reach the local model: {exc}. Is Ollama running? Try: ollama serve]{RESET}" if OLLAMA
+                  else f"\n{DIM}[could not reach the AI server at {BACKEND.base_url}: {exc}]{RESET}")
 
 
 if __name__ == "__main__":

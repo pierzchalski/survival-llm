@@ -2,7 +2,7 @@
 
 chat_events() runs one turn of a conversation: it streams the model's answer and runs its
 library tools, yielding plain dicts so each front end can show progress its own way.
-Talks only to the local Ollama server, so it works with Wi-Fi off.
+Talks only to the local Ollama server, so it works with Wi-Fi off, unless set up to use another server (backends/).
 """
 import json
 import os
@@ -14,7 +14,7 @@ from library.search import STOPWORDS, TOPICS
 from memory import _stems, asked_memory, forgets
 
 HOST = "http://" + os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
-BACKEND = backends.OllamaBackend(HOST)  # the server that answers (backends/)
+BACKEND = backends.from_config(HOST)  # the server that answers: Ollama unless configured otherwise (backends/config.py)
 MAX_TOOL_ROUNDS = 6
 # Longest reply the model may write in one go, set by the person's "Length limit" (tokens; -1 = no limit). A model
 # stuck repeating itself would otherwise run, and drain the battery, until someone noticed (Qwen 3.6 once went an
