@@ -8,8 +8,9 @@ configured per server (THINKING).
 import json
 import time
 
-from ._http import BackendError, Client, sse_data
-from .base import Backend, Features, paired, parse_arguments
+from ._http import BackendError, sse_data
+from .base import paired, parse_arguments
+from .remote import RemoteBackend
 
 # How core's "think" setting (None, False, True, "low" or "xhigh") is sent:
 #   none                  nothing is sent, and the model isn't offered the app's Reasoning setting
@@ -43,61 +44,21 @@ def to_openai(messages):
     return out
 
 
-def model_names(answer):
-    """Model names from a /models answer: most servers list {"id"} under "data", some {"name"} under "models", a
-    few a plain list of names."""
-    items = (answer.get("data") or answer.get("models") or []) if isinstance(answer, dict) else answer
-    names = []
-    for item in items if isinstance(items, list) else []:
-        name = (item.get("id") or item.get("name")) if isinstance(item, dict) else item
-        if isinstance(name, str) and name:
-            names.append(name)
-    return names
-
-
-class OpenAIBackend(Backend):
+class OpenAIBackend(RemoteBackend):
     kind = "openai"
     label = "OpenAI-compatible server"
-    features = Features(list_models=True)
+    THINKING = THINKING
 
-    def __init__(self, base_url, api_key="", model=None, thinking="none", max_tokens=None, caps=None):
-        """base_url: up to and including /v1, e.g. "http://127.0.0.1:8000/v1". caps: the capabilities to report
-        for every model (default: tools, plus thinking unless thinking is "none")."""
-        if thinking not in THINKING:
-            raise ValueError(f"thinking must be one of {', '.join(THINKING)}")
-        self.base_url, self.fixed_model, self.thinking, self.max_tokens = base_url, model or None, thinking, max_tokens
-        self.client = Client(base_url, {"Authorization": "Bearer " + api_key} if api_key else {}, api_key)
-        self._caps = set(caps) if caps is not None else {"tools"} | ({"thinking"} if thinking != "none" else set())
-        self.last_error = None
-
-    def __repr__(self):
-        return f"OpenAIBackend({self.base_url!r}, model={self.fixed_model!r}, thinking={self.thinking!r})"
-
-    def models(self):
-        """The server's models, or just the configured one if there is one. None when the server can't be reached,
-        or (with no configured model) refused to list them; last_error then says why."""
-        self.last_error = None
-        try:
-            names = model_names(self.client.request("/models", timeout=5))
-        except BackendError as exc:
-            names, self.last_error = None, exc  # it answered, with an error: a wrong key, or no /models
-        except (OSError, ValueError) as exc:
-            self.last_error = exc
-            return None
-        return [self.fixed_model] if self.fixed_model else names
-
-    def capabilities(self, model):
-        return set(self._caps)
+    def auth_headers(self, api_key):
+        return {"Authorization": "Bearer " + api_key}
 
     def body(self, model, messages, tools, think, options):
         body = {"model": model, "messages": to_openai(messages), "stream": True,
                 "stream_options": {"include_usage": True}}
         if tools:
             body["tools"] = tools
-        limit, cap = options.get("num_predict"), self.max_tokens
-        limit = limit if isinstance(limit, int) and limit > 0 else None
-        if limit or cap:
-            body["max_tokens"] = min(n for n in (limit, cap) if n)
+        if self.max_reply(options):
+            body["max_tokens"] = self.max_reply(options)
         for field in ("temperature", "top_p"):
             if field in options:
                 body[field] = options[field]

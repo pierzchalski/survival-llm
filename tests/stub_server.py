@@ -57,7 +57,7 @@ class Stub:
                     body = json.loads(raw) if raw else None
                 except ValueError:
                     body = raw
-                stub.requests.append({"method": method, "path": self.path, "headers": dict(self.headers),
+                stub.requests.append({"method": method, "path": self.path, "headers": self.headers,  # any case
                                       "body": body})
                 queue = stub.replies.get((method, self.path)) or []
                 reply = queue.pop(0) if queue else Reply(['{"error": "no reply scripted"}'], status=599)

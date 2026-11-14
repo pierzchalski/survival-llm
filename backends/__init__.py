@@ -3,5 +3,6 @@ from ._http import BackendError
 from .base import Backend, Features
 from .ollama import OllamaBackend
 from .openai_chat import OpenAIBackend
+from .anthropic_messages import AnthropicBackend
 
-__all__ = ["Backend", "BackendError", "Features", "OllamaBackend", "OpenAIBackend"]
+__all__ = ["AnthropicBackend", "Backend", "BackendError", "Features", "OllamaBackend", "OpenAIBackend"]
