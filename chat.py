@@ -48,13 +48,30 @@ def open_article(library, passage_id):
     print(f"{DIM}  · opened: {doc['title']} ({doc['source']}){RESET}")
 
 
+def corrected_tail(shown, answer):
+    """What to print after an answer that streamed as shown, so the screen ends with the answer core settled on
+    (core replaces a Sources line naming articles the model never opened, adds one when it named none, and drops
+    passage ids): (text, replaced). When shown is the start of the answer, text is the rest of it; otherwise it is
+    the answer from the first line that differs, and replaced is True."""
+    shown, answer = shown.strip(), answer.strip()
+    if answer == shown:
+        return "", False
+    if answer.startswith(shown):
+        return answer[len(shown):], False
+    same = next((i for i, (a, b) in enumerate(zip(shown, answer)) if a != b), min(len(shown), len(answer)))
+    return answer[answer.rfind("\n", 0, same) + 1:], True
+
+
 def run_turn(model, library, messages, level, caps, length="normal"):
     """Print one answer as it streams; returns the sources it used and its reasoning (for /reasoning)."""
     sources, reasoning = [], []  # reasoning: what it thought, with its lookups in between
     fresh = True  # nothing printed since the last lookup; skip the blank lines models emit before tool calls
     thinking, thoughts = False, 0  # in a stretch of reasoning; how many stretches
+    shown = ""  # the answer as printed so far: text before a lookup or a retry isn't the answer
     for ev in chat_events(model, library, messages, reasoning=level, caps=caps, length=length):
         kind = ev["type"]
+        if kind in ("search", "read", "show", "retry"):
+            shown = ""
         if kind not in ("token", "tick"):
             fresh = True
         if kind != "tick":
@@ -86,9 +103,16 @@ def run_turn(model, library, messages, level, caps, length="normal"):
             if fresh and not ev["text"].strip():
                 continue
             fresh = False
+            shown += ev["text"]
             print(ev["text"], end="", flush=True)
         elif kind == "done":
             sources = ev["sources"]
+            tail, replaced = corrected_tail(shown, ev.get("answer") or "") if not ev.get("unfinished") else ("", False)
+            if replaced:
+                why = ": it named sources it never opened" if ev.get("unopened") else ""
+                print(f"\n\n{DIM}[corrected by the app{why}]{RESET}\n{tail}", end="")
+            elif tail:
+                print(tail, end="")
             speed = f" · {ev['tokens'] / ev['seconds']:.0f} tok/s" if ev["seconds"] else ""
             note = " · /sources to see what it read" if sources else ""
             if ev.get("cut_off"):
