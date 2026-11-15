@@ -205,7 +205,7 @@ def run_tool(library, name, args):
         if not doc:
             return NO_PASSAGE, None
         event = {"type": "read" if name == "read_article" else "show", "id": pid,
-                 "title": doc["title"], "source": doc["source"], "official": doc["official"]}
+                 "title": doc["title"], "source": doc["source"], "official": doc["official"], "url": doc.get("url")}
         if name == "show_article":
             return f"Opened \"{doc['title']}\" ({doc['source']}) on screen.", event
         more = f"\n\n[More of this article: read_article(id={doc['next_id']})]" if doc["next_id"] else ""
@@ -404,7 +404,7 @@ def chat_events(model, library, messages, reasoning="off", caps=None, length="no
             known |= _ids(result)
             if event:
                 if event["type"] in ("read", "show"):
-                    sources.setdefault(event["id"], {k: event.get(k) for k in ("title", "source", "official")})
+                    sources.setdefault(event["id"], {k: event.get(k) for k in ("title", "source", "official", "url")})
                 for hit in event.get("results", []):
                     seen.setdefault(hit["id"], {k: hit.get(k) for k in ("title", "source", "official")})
                 yield event
@@ -499,7 +499,7 @@ def _rescue(model, library, messages, question, sources, seen, options):
             continue
         blocks.append(f"[{doc['title']} ({doc['source']})]\n{doc['text']}")
         if pid not in sources:
-            sources[pid] = {k: doc[k] for k in ("title", "source", "official")}
+            sources[pid] = dict({k: doc[k] for k in ("title", "source", "official")}, url=doc.get("url"))
             yield {"type": "read", "id": pid, **sources[pid]}
         if len(blocks) == 4:
             break
@@ -670,7 +670,15 @@ GENERIC = STOPWORDS | set("manual manuals guide guides guideline guidelines guid
 
 
 def _content_words(text):
-    return {w for w in re.findall(r"[a-z0-9]+", re.sub(r"\bid\s*\d+", " ", text.lower())) if w not in GENERIC}
+    """Words that name something, a plural s off ("MedlinePlus Burns" names "Burn"), as memory._stems does."""
+    words = [w for w in re.findall(r"[a-z0-9]+", re.sub(r"\bid\s*\d+", " ", text.lower())) if w not in GENERIC]
+    return {w[:-1] if len(w) > 3 and w.endswith("s") and not w[:-1].isdigit() else w for w in words}
+
+
+def _site_words(article):
+    """The words of the website an opened article came from ("www.ready.gov"), when its address is known."""
+    found = re.match(r"https?://([^/:?#\s]+)", article.get("url") or "")
+    return _content_words(found.group(1)) if found else set()
 
 
 TRAILING_PARENS = re.compile(r"^(.*?)\s*\(((?:[^()]|\([^()]*\))*)\)\s*$")
@@ -691,10 +699,12 @@ def _claims_source(paren, articles):
 
 def _names_article(text, article, articles, full=None):
     """Whether one named source is this article: (nearly) its whole title or a shortened form of it, or just its
-    collection's name. A publisher in parentheses at the end of the full item must be the article's own."""
+    collection's name. A publisher in parentheses at the end of the full item must be the article's own: its
+    collection, or the website the article came from ("(Ready.gov)" for a manual from www.ready.gov)."""
     title, source = _content_words(article["title"]), _content_words(article["source"])
     found = TRAILING_PARENS.match(full or text)
-    if found and _claims_source(found.group(2), articles) and not _content_words(found.group(2)) <= title | source:
+    if found and _claims_source(found.group(2), articles) \
+            and not _content_words(found.group(2)) <= title | source | _site_words(article):
         return False  # "Fever (Mayo Clinic)" when it read MedlinePlus
     found = TRAILING_PARENS.match(text)
     words = _content_words(found.group(1) if found else text)
@@ -705,6 +715,8 @@ def _names_article(text, article, articles, full=None):
         return True
     if title and len(words - source) >= 2 and words - source <= title:  # a shortened title
         return True
+    if title and words & source and words - source and words - source <= title:  # "MedlinePlus Burns": its collection
+        return True                                                              # and words from its title
     return words <= source  # just the collection: fine if it read something from it
 
 
@@ -735,14 +747,14 @@ def _opened(item, read, read_before=(), opened_ids=()):
 
 
 def _read_earlier(messages):
-    """Articles opened for earlier questions in this chat ({title, source}), from the tool results kept in it."""
+    """Articles opened for earlier questions in this chat ({title, source, url}), from the tool results kept in it."""
     found = []
     for m in messages:
         if m.get("role") == "tool" and m.get("tool_name") == "read_article":
-            first = (m.get("content") or "").split("\n", 1)[0]
+            first, url = ((m.get("content") or "").split("\n", 2) + [""])[:2]  # run_tool's title line, then address
             parsed = re.match(r"^(.*) \(((?:[^()]|\([^()]*\))*)\)$", first)
             if parsed:
-                found.append({"title": parsed.group(1), "source": parsed.group(2)})
+                found.append({"title": parsed.group(1), "source": parsed.group(2), "url": url})
     return found
 
 
