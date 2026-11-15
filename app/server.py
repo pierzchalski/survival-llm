@@ -56,7 +56,7 @@ def _refuse_start(message):
         pass
     if sys.stderr is not None:
         print(message, file=sys.stderr, flush=True)
-    if __name__ == "__main__" and "--no-browser" not in sys.argv:  # opened as the app: say it in a window too
+    if __name__ == "__main__" and not {"--no-browser", "--browser"} & set(sys.argv):  # the app's window: say it there
         try:
             import html
             import webview
@@ -668,6 +668,8 @@ def remote_error(exc, model=None):
     reason = getattr(exc, "reason", exc)
     if "timed out" in str(reason).lower() or isinstance(reason, TimeoutError):
         return f"The {where} took too long to answer. Try again, or check that it is still running."
+    if getattr(exc, "errno", None) == errno.ENOSPC:  # this computer's disk (saving notes, say), not the server
+        return "The disk is full. Free up some space, then try again."
     if isinstance(exc, OSError):
         return f"Can't reach the {where}. Check that it is running and the address is right, then try again."
     return f"Something went wrong: {exc}"

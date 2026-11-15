@@ -160,6 +160,7 @@ cases = [
     (E("said: overloaded", 529, "busy"), f"The {where} is busy"),
     (urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")), f"Can't reach the {where}"),
     (TimeoutError("timed out"), f"The {where} took too long"),
+    (OSError(28, "No space left on device"), "The disk is full"),
     (server.ConfigError("qwen3.6-colibri needs to reason a little"), "The AI server settings can't be used: qwen3.6"),
 ]
 for exc, want in cases:
@@ -264,6 +265,11 @@ out = subprocess.run([sys.executable, os.path.join(ROOT, "app", "server.py")], e
 page = open(shown).read() if os.path.exists(shown) else ""
 check("bad settings: the app stops and shows why in a window", out.returncode == 1
       and "settings can't be used" in page and "query string" in page, (out.returncode, page))
+os.remove(shown)
+out = subprocess.run([sys.executable, os.path.join(ROOT, "app", "server.py"), "--browser"], env=env,
+                     capture_output=True, text=True, timeout=60)
+check("but not with --browser, which asks for no window", out.returncode == 1 and not os.path.exists(shown)
+      and "query string" in out.stderr, (out.returncode, out.stderr[-200:]))
 
 # ---------- the badge: when questions leave this computer ----------
 for url, want in [("http://127.0.0.1:8000/v1", None), ("http://localhost:8000/v1", None),
