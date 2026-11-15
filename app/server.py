@@ -42,7 +42,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from backends import ConfigError  # noqa: E402
+from backends import BackendError, ConfigError  # noqa: E402
 from backends.config import app_dir  # noqa: E402
 
 
@@ -56,6 +56,15 @@ def _refuse_start(message):
         pass
     if sys.stderr is not None:
         print(message, file=sys.stderr, flush=True)
+    if __name__ == "__main__" and "--no-browser" not in sys.argv:  # opened as the app: say it in a window too
+        try:
+            import html
+            import webview
+            page = f"<p style='font:16px sans-serif;margin:2em'>{html.escape(message, quote=False)}</p>"
+            webview.create_window("Survival LLM", html=page, width=640, height=320)
+            webview.start()
+        except Exception:  # noqa: BLE001 - no window support: stderr and app.log have it
+            pass
     sys.exit(1)
 
 
@@ -638,8 +647,36 @@ def loaded_models():
         return []
 
 
-def friendly_error(exc):
+def remote_error(exc, model=None):
+    """friendly_error for a server other than Ollama. It starts nothing: the server is the person's to run."""
+    where = f"{BACKEND.label} at {BACKEND.base_url}"
+    if isinstance(exc, ConfigError):  # a model with a reasoning floor these settings can't meet (backends/config.py)
+        return f"The AI server settings can't be used: {exc}"
+    if isinstance(exc, BackendError):  # its message names the server, and never holds the key
+        if exc.kind == "auth":
+            return (f"The {where} didn't accept the API key. Check SURVIVAL_LLM_API_KEY "
+                    "(\"api_key\" in backend.json), then open Survival LLM again.")
+        if exc.kind == "not_found":
+            served = served_models(fresh=True) or []
+            return (f"The {where} doesn't serve {model or 'this model'}."
+                    + (f" It serves {', '.join(served[:8])}: pick one under Model." if served else ""))
+        if exc.kind == "context":
+            return "This chat has grown too long for the AI server. Start a new chat."
+        if exc.kind == "busy":
+            return f"The {where} is busy. Try again in a moment."
+        return f"{exc}"
+    reason = getattr(exc, "reason", exc)
+    if "timed out" in str(reason).lower() or isinstance(reason, TimeoutError):
+        return f"The {where} took too long to answer. Try again, or check that it is still running."
+    if isinstance(exc, OSError):
+        return f"Can't reach the {where}. Check that it is running and the address is right, then try again."
+    return f"Something went wrong: {exc}"
+
+
+def friendly_error(exc, model=None):
     """Plain-language explanation of an Ollama or network failure."""
+    if REMOTE:
+        return remote_error(exc, model)
     if isinstance(exc, urllib.error.HTTPError):
         try:
             detail = json.loads(exc.read().decode("utf-8", "replace")).get("error", "")
@@ -700,7 +737,7 @@ def download_error(exc):
             return friendly_error(exc), "again"
         return f"The download site answered with an error (HTTP {exc.code}).", "again"
     reason = getattr(exc, "reason", exc)
-    if isinstance(reason, ConnectionRefusedError):  # the AI engine went away mid-download
+    if isinstance(reason, ConnectionRefusedError) and not REMOTE:  # the AI engine went away mid-download
         start_ollama()
         return "The AI engine stopped. Starting it again.", "network"
     if isinstance(reason, ssl.SSLCertVerificationError):
@@ -792,11 +829,14 @@ def answers_from(base_url):
     return None if ip.is_loopback or ip.is_private or ip.is_link_local else host
 
 
-def backend_status():
-    """Which server answers, for the page to show. Never the API key: the backend keeps it in its client only."""
+def backend_status(unreachable):
+    """Which server answers, for the page to show. Never the API key: the backend keeps it in its client only.
+    error: why a remote server's models are missing (unreachable, a wrong key...), in plain words."""
+    why = getattr(BACKEND, "last_error", None)
     return {"kind": BACKEND.kind, "label": BACKEND.label, "base_url": BACKEND.base_url,
             "fixed_model": BACKEND.fixed_model, "features": dataclasses.asdict(FEATURES),
-            "answers_from": answers_from(BACKEND.base_url) if REMOTE else None}
+            "answers_from": answers_from(BACKEND.base_url) if REMOTE else None,
+            "error": remote_error(why) if REMOTE and unreachable and why is not None else None}
 
 
 def visible_models(models):
@@ -1831,7 +1871,7 @@ class Handler(BaseHTTPRequestHandler):
             "version": VERSION, "dev": DEV,
             "update": {"app": (newer_app() or {}).get("version"), "library": newer_library()},
             "machine": {"os": "macOS" if sys.platform == "darwin" else platform.system(), "ram_gb": ram_gb()},
-            "topics": TOPICS, "backend": backend_status()}
+            "topics": TOPICS, "backend": backend_status(models is None)}
 
     def do_POST(self):
         if not self._allowed():
@@ -2080,7 +2120,10 @@ class Handler(BaseHTTPRequestHandler):
         if not model or not question:
             return self._send(400, {"error": "model and message are required"})
         conv = conversations.setdefault(body.get("conversation") or uuid.uuid4().hex, {"model": None, "run": 0})
-        caps = model_caps(model)
+        try:
+            caps = model_caps(model)
+        except ConfigError as exc:  # a remote model these settings can't run safely: say why, ask nothing
+            return self._send(400, {"error": friendly_error(exc)})
         if conv.get("model") != model:  # new chat, or the model changed mid-chat
             conv.update(model=model, messages=[{"role": "system", "content": prompt_for(caps)}])
         conv["run"] += 1  # a newer question on this chat stops any older one still running
@@ -2109,7 +2152,7 @@ class Handler(BaseHTTPRequestHandler):
             pass  # stopped, or the page was closed
         except Exception as exc:
             try:
-                self._event({"type": "error", "message": friendly_error(exc)})
+                self._event({"type": "error", "message": friendly_error(exc, model)})
             except OSError:
                 pass
         finally:

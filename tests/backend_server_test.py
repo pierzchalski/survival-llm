@@ -18,7 +18,7 @@ import urllib.error
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-from stub_server import Stub, json_reply  # noqa: E402
+from stub_server import Stub, json_reply, sse_reply  # noqa: E402
 
 KEY = "sk-gui-SECRET-5555555555"
 CHILD = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].startswith("--child=") else None
@@ -150,11 +150,57 @@ status()
 check("Try again asks the server again", code == 200 and len(REMOTE.bodies("/v1/models")) == n + 1,
       (code, n, len(REMOTE.bodies("/v1/models"))))
 
+# ---------- errors, in plain words, and a question asked through the page's own API ----------
+E = server.BackendError
+where = f"OpenAI-compatible server at {REMOTE.url}/v1"
+cases = [
+    (E(f"said: bad key {KEY[:4]}[key]", 401, "auth"), "didn't accept the API key"),
+    (E("said: no such model", 404, "not_found"), "doesn't serve gpt-x. It serves qwen3.6-colibri, my model@2"),
+    (E("said: context_length_exceeded", 400, "context"), "too long for the AI server. Start a new chat"),
+    (E("said: overloaded", 529, "busy"), f"The {where} is busy"),
+    (urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")), f"Can't reach the {where}"),
+    (TimeoutError("timed out"), f"The {where} took too long"),
+    (server.ConfigError("qwen3.6-colibri needs to reason a little"), "The AI server settings can't be used: qwen3.6"),
+]
+for exc, want in cases:
+    got = server.friendly_error(exc, "gpt-x")
+    check(f"{type(exc).__name__} {getattr(exc, 'kind', '')}: {want[:40]}", want in got and KEY not in got, got)
+got = server.download_error(urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")))
+check("a refused library download is the internet, not the AI engine", "AI engine" not in got[0], got)
+
+
+def chat(model, message="How do I purify water?"):
+    code, text = call("/api/chat", {"model": model, "message": message})
+    events = [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
+    return code, text, events
+
+
+DONE = "data: [DONE]\n\n"
+REMOTE.queue("POST", "/v1/chat/completions", sse_reply([
+    {"choices": [{"index": 0, "delta": {"content": "Boil it for one minute."}}]},
+    {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}, DONE]))
+code, text, events = chat("my model@2")
+check("a question is answered through /api/chat", code == 200 and "Boil it for one minute." in
+      "".join(e.get("text", "") for e in events if e["type"] == "token") and any(e["type"] == "done" for e in events),
+      text[-400:])
+REMOTE.queue("POST", "/v1/chat/completions", json_reply({"error": {"message": f"Incorrect API key {KEY}",
+                                                                   "type": "invalid_request_error"}}, status=401))
+code, text, events = chat("my model@2", "And snow?")
+errors = [e["message"] for e in events if e["type"] == "error"]
+check("a refused key comes back as a readable chat error", errors and "didn't accept the API key" in errors[0]
+      and KEY not in text, text[-400:])
+n = len(REMOTE.bodies("/v1/chat/completions"))
+code, text, events = chat("qwen3.6-colibri")
+check("the reasoning floor refuses with the reason, before asking anything", code == 400
+      and "settings can't be used: qwen3.6-colibri needs to reason" in json.loads(text).get("error", "")
+      and len(REMOTE.bodies("/v1/chat/completions")) == n, (code, text[:300]))
+
 # ---------- the server can't be reached ----------
 REMOTE.close()
 server.models_seen[0] = 0
 s, text = status()
 check("unreachable: the status says the server isn't answering", s["ollama"] is False and s["models"] == [], s["ollama"])
+check("and why, in plain words", (s["backend"].get("error") or "").startswith(f"Can't reach the {where}"), s["backend"])
 check("setup waits for the server rather than for Ollama", server.setup_step({"model": "qwen3.6-colibri"}) ==
       ("wait", "backend-unreachable"), server.setup_step({"model": "qwen3.6-colibri"}))
 server.friendly_error(urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")))
@@ -189,6 +235,22 @@ check("Ollama: status as before, with the catalogue", (o.get("backend") or {}).g
       and len(o.get("catalog") or []) > 0 and o.get("ollama") is True
       and (o.get("backend") or {}).get("answers_from") is None, (o.get("backend"), len(o.get("catalog") or [])))
 check("Ollama: still finds the ollama command", o.get("ollama_installed") is True, o.get("ollama_installed"))
+
+# ---------- unusable settings, opened as the app: the reason is shown in a window ----------
+FAKE = os.path.join(TMP, "fakewebview")
+os.makedirs(FAKE)
+with open(os.path.join(FAKE, "webview.py"), "w") as f:  # records what it was asked to show
+    f.write("import os\ndef create_window(title, html='', **kw):\n"
+            "    open(os.environ['SHOWN'], 'w').write(html)\ndef start(*a, **kw):\n    pass\n")
+shown = os.path.join(TMP, "shown.html")
+env = {k: v for k, v in os.environ.items() if not k.startswith("SURVIVAL_LLM_")}
+env.update(SURVIVAL_LLM_APP_DIR=os.path.join(TMP, "settings2"), SURVIVAL_LLM_BACKEND="openai",
+           SURVIVAL_LLM_BASE_URL="127.0.0.1:8000?x=1", PYTHONPATH=FAKE, SHOWN=shown)
+out = subprocess.run([sys.executable, os.path.join(ROOT, "app", "server.py")], env=env, capture_output=True,
+                     text=True, timeout=60)
+page = open(shown).read() if os.path.exists(shown) else ""
+check("bad settings: the app stops and shows why in a window", out.returncode == 1
+      and "settings can't be used" in page and "query string" in page, (out.returncode, page))
 
 # ---------- the badge: when questions leave this computer ----------
 for url, want in [("http://127.0.0.1:8000/v1", None), ("http://localhost:8000/v1", None),
