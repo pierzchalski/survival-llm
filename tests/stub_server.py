@@ -44,6 +44,7 @@ class Stub:
         self.replies = {}  # (method, path) -> [Reply, ...]
         self.requests = []  # {"method", "path", "headers", "body"} in arrival order
         self.broken = []  # paths whose client went away before the reply was written out
+        self.always = {}  # (method, path) -> Reply sent whenever that path's queue is empty (a status poll, say)
         stub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -60,7 +61,8 @@ class Stub:
                 stub.requests.append({"method": method, "path": self.path, "headers": self.headers,  # any case
                                       "body": body})
                 queue = stub.replies.get((method, self.path)) or []
-                reply = queue.pop(0) if queue else Reply(['{"error": "no reply scripted"}'], status=599)
+                reply = queue.pop(0) if queue else stub.always.get((method, self.path)) or \
+                    Reply(['{"error": "no reply scripted"}'], status=599)
                 try:
                     self.send_response(reply.status)
                     self.send_header("Content-Type", reply.content_type)

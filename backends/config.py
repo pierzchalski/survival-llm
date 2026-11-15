@@ -24,8 +24,8 @@ none (or caps without thinking), check_reasoning() refuses the model rather than
 allow_no_reasoning is set.
 
 Everything but "backend" is for openai and anthropic: Ollama's address stays OLLAMA_HOST. The settings are read once,
-when core.py is imported. Only the terminal chat (chat.py) can use openai or anthropic so far: the app window
-(app/server.py) refuses to start with them. A backend.json holding an api_key must not be readable by other users
+when core.py is imported. With openai or anthropic the app window (app/server.py) never starts, installs or
+downloads through Ollama, and offers no model downloads. A backend.json holding an api_key must not be readable by other users
 (chmod 600).
 """
 import json

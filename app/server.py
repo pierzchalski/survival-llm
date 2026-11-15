@@ -8,12 +8,14 @@ import atexit
 import base64
 import bisect
 import ctypes
+import dataclasses
 import datetime
 import errno
 import filecmp
 import hashlib
 import http.client
 import io
+import ipaddress
 import json
 import math
 import os
@@ -61,10 +63,9 @@ try:
     from core import BACKEND, HOST, capabilities, chat_events, installed_models, system_prompt, trim  # noqa: E402
 except ConfigError as exc:  # backend.json or a SURVIVAL_LLM_* variable (backends/config.py)
     _refuse_start(f"Survival LLM can't start: the AI server settings can't be used: {exc}")
-if BACKEND.kind != "ollama":  # setup and model downloads below still assume Ollama
-    _refuse_start(f"Survival LLM can't start: the settings choose {BACKEND.label} at {BACKEND.base_url}, and the app "
-                  "window works only with Ollama so far. Use chat.py to talk to that server, or remove "
-                  "SURVIVAL_LLM_BACKEND and backend.json to use Ollama.")
+# Another server than Ollama (backends/config.py): the app then never finds, starts, installs or downloads through
+# Ollama; what it may do instead is in FEATURES, checked where the Ollama code is.
+REMOTE, FEATURES = BACKEND.kind != "ollama", BACKEND.features
 from library import myfiles, search  # noqa: E402
 from memory import MAX_CHARS as MEMORY_MAX, Memory, parse as parse_notes, prompt_section, size as notes_size  # noqa: E402
 from library.search import DB_PATH, LIB, TOPICS, Library  # noqa: E402
@@ -502,6 +503,8 @@ def library_packs():
 
 def ollama_locations():
     """(app to open, command-line binary) for the app's own Ollama or an installed one, either may be None."""
+    if not FEATURES.engine_lifecycle:  # another server answers: Ollama is none of the app's business
+        return None, None
     if sys.platform == "darwin":
         apps = ["/Applications/Ollama.app", os.path.expanduser("~/Applications/Ollama.app")]
         bins = [ENGINE, "/opt/homebrew/bin/ollama", "/usr/local/bin/ollama", shutil.which("ollama")]
@@ -593,6 +596,8 @@ def own_engine_version():
 def running_engine():
     """{"version", "ours"} for the AI engine answering now, or None. "ours": started by this app, not an Ollama app
     the person runs themselves (which Survival LLM uses when it finds one already running)."""
+    if not FEATURES.version:  # another server than Ollama: no engine version to compare
+        return None
     at, version = engine_versions["running"]
     if time.monotonic() - at > 60 or version is None:
         try:
@@ -624,6 +629,8 @@ def engine_too_old():
 
 def loaded_models():
     """Models Ollama currently has in memory (ready to answer without loading)."""
+    if not FEATURES.loaded_state:  # another server says nothing about it: count what it serves as ready
+        return [m for m in served_models() or []]
     try:
         with urllib.request.urlopen(HOST + "/api/ps", timeout=3) as resp:
             return [m["name"].removesuffix(":latest") for m in json.load(resp).get("models", [])]
@@ -759,6 +766,39 @@ def start_job(key, label, worker, *args):
 NEW_USER_GOT = os.path.join(APP_DIR, "new-user-downloaded.json")  # bin/dev --new-user: models "downloaded" so far
 
 
+models_seen = [0.0, None]  # (when, list) of the last answer from a remote server
+
+
+def served_models(fresh=False):
+    """installed_models(); for a server other than Ollama, the answer is kept for 30 s (5 s while it can't be
+    reached), since the page asks for the status every few seconds. fresh: ask again now (Try again)."""
+    if not REMOTE:
+        return installed_models()
+    if fresh or time.monotonic() - models_seen[0] > (30 if models_seen[1] is not None else 5):
+        models_seen[:] = [time.monotonic(), installed_models()]
+    return models_seen[1]
+
+
+def answers_from(base_url):
+    """The server's host name when questions leave this computer for it, else None: an address on this computer
+    or a private network doesn't count, but any other name does, since where it points can't be told offline."""
+    host = urlparse(base_url).hostname or ""
+    if host == "localhost" or host.endswith(".localhost"):
+        return None
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    return None if ip.is_loopback or ip.is_private or ip.is_link_local else host
+
+
+def backend_status():
+    """Which server answers, for the page to show. Never the API key: the backend keeps it in its client only."""
+    return {"kind": BACKEND.kind, "label": BACKEND.label, "base_url": BACKEND.base_url,
+            "fixed_model": BACKEND.fixed_model, "features": dataclasses.asdict(FEATURES),
+            "answers_from": answers_from(BACKEND.base_url) if REMOTE else None}
+
+
 def visible_models(models):
     """Installed models, less the ones bin/dev --new-user pretends aren't downloaded yet (until "downloaded" in this
     preview, which is remembered, so quitting and reopening it works the way it does for a new person)."""
@@ -775,6 +815,8 @@ def visible_models(models):
 
 
 def pull_worker(key, model):
+    if not FEATURES.manage_models:  # the routes refuse first; this keeps any other way in from reaching Ollama
+        raise RuntimeError(f"{BACKEND.label} can't download models from the app.")
     req = urllib.request.Request(HOST + "/api/pull", data=json.dumps({"model": model}).encode(),
                                  headers={"Content-Type": "application/json"})
     stop, layers = cancels.get(key), {}
@@ -986,6 +1028,8 @@ def library_worker(key, pack_id):
 
 def warm_model(model):
     """Load a model into memory ahead of the first question, so that question isn't slow."""
+    if not FEATURES.warm:  # another server than Ollama loads models its own way
+        return
     if warming.get(model) == "loading" or model.removesuffix(":latest") in loaded_models():
         return
     if DEV:  # restarted after every change, a dev copy would load the model each time (80 GB for Nemotron Super)
@@ -1221,6 +1265,8 @@ def setup_step(plan):
     model = plan.get("model")
     if not model:
         return None
+    if not FEATURES.manage_models:  # nothing to download: the server has its models, or isn't answering yet
+        return ("wait", "backend-unreachable") if served_models() is None else None
     models = visible_models(installed_models())
     if models is None:  # the AI engine isn't answering
         app, binary = ollama_locations()
@@ -1747,16 +1793,16 @@ class Handler(BaseHTTPRequestHandler):
     def _status(self):
         if time.monotonic() - my_files_checked[0] > 30:  # picks up files changed or added in the folder itself
             check_my_files()
-        models = visible_models(installed_models())
+        models = visible_models(served_models())
         if models is None:
             start_ollama()
         app, binary = ollama_locations()
-        info = engine_info()
+        info = engine_info() if FEATURES.engine_lifecycle else None
         lib = library()
         docs, sources = lib.stats() if lib else (0, 0)
         mine = lib.mine.stats()[0] if lib and lib.mine else 0
         chat_models = [m.removesuffix(":latest") for m in models or [] if not any(x in m for x in NOT_CHAT)]
-        catalog = machine_catalog(chat_models)
+        catalog = machine_catalog(chat_models) if FEATURES.manage_models else []  # nothing to download elsewhere
         if HIDDEN["models"]:  # bin/dev --new-user: these "download" in seconds, so time estimates leave them out
             for c in catalog:
                 c["preview_cached"] = any((catalog_entry(m) or {}).get("key") == c["key"] for m in HIDDEN["models"])
@@ -1768,7 +1814,8 @@ class Handler(BaseHTTPRequestHandler):
             "engine": {"downloadable": bool(info and ENGINE and not (app or binary)),
                        "gb": round(info["bytes"] / 1e9, 1) if info else None,
                        "running": running_engine() if models is not None else None},
-            "models": [{"model": m, "name": friendly_name(m), "tested": bool(catalog_entry(m))} for m in chat_models],
+            "models": [{"model": m, "name": friendly_name(m), "tested": bool(catalog_entry(m)) and not REMOTE}
+                       for m in chat_models],  # a remote server's model may share a name, not the app's tests
             "default_model": best or (chat_models or [None])[0],
             "loaded": loaded_models() if models is not None else [],
             "warming": [m for m, s in warming.items() if s == "loading"],
@@ -1784,7 +1831,7 @@ class Handler(BaseHTTPRequestHandler):
             "version": VERSION, "dev": DEV,
             "update": {"app": (newer_app() or {}).get("version"), "library": newer_library()},
             "machine": {"os": "macOS" if sys.platform == "darwin" else platform.system(), "ram_gb": ram_gb()},
-            "topics": TOPICS}
+            "topics": TOPICS, "backend": backend_status()}
 
     def do_POST(self):
         if not self._allowed():
@@ -1794,7 +1841,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._add_file(url)
         body = self._body()
         model = str(body.get("model") or "")
-        if model and not re.fullmatch(r"[\w.:/-]{1,120}", model):
+        # another server's model names are its own (spaces, "@"): only control characters are kept out
+        if model and not re.fullmatch(r"[^\x00-\x1f\x7f]{1,200}" if REMOTE else r"[\w.:/-]{1,120}", model):
             return self._send(400, {"error": "bad model name"})
         if url.path == "/api/prompt":  # save the person's instructions ("" or reset: back to the default)
             text = "" if body.get("reset") else str(body.get("text") or "").strip()
@@ -1861,6 +1909,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"conversation": uuid.uuid4().hex})
         if url.path == "/api/chat":
             return self._chat(body)
+        if (url.path == "/api/pull" and not FEATURES.manage_models
+                or url.path in ("/api/engine", "/api/start-ollama") and not FEATURES.engine_lifecycle):
+            return self._send(409, {"error": f"Survival LLM uses {BACKEND.label} at {BACKEND.base_url}, which "
+                                             "manages its own models: the app doesn't download or start anything for it."})
         if url.path == "/api/pull":
             started = start_job(f"model:{model}", friendly_name(model), pull_worker, model)
             return self._send(200 if started else 409, {"ok": started})
@@ -1876,7 +1928,8 @@ class Handler(BaseHTTPRequestHandler):
             pack = str(body.get("pack") or "") or None
             if pack and pack not in [p["id"] for p in library_packs()]:
                 return self._send(400, {"error": "That library pack isn't available. Check the internet connection."})
-            if model and model not in [c["model"] for c in machine_catalog(visible_models(installed_models()) or [])]:
+            if model and model not in ((served_models(fresh=True) or []) if not FEATURES.manage_models else
+                                       [c["model"] for c in machine_catalog(visible_models(installed_models()) or [])]):
                 return self._send(400, {"error": "unknown model"})
             if not (pack or model):
                 return self._send(400, {"error": "nothing to download"})
@@ -1921,6 +1974,7 @@ class Handler(BaseHTTPRequestHandler):
             use_files_dir(folder)
             return self._send(200, {"ok": True})
         if url.path == "/api/setup/retry":  # Try now / Try again
+            models_seen[0] = 0  # a remote server: ask it again, rather than show its last answer
             setup_wake.set()
             return self._send(200, {"ok": True})
         if url.path == "/api/setup/cancel":  # change what to download: stop the setup downloads, back to the choices
