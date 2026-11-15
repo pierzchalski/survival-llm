@@ -16,6 +16,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from backends import ConfigError  # noqa: E402
 from core import capabilities, chat_events, memory_check, system_prompt, think_setting  # noqa: E402
 from library.search import Library  # noqa: E402
 from memory import Memory, prompt_section  # noqa: E402
@@ -177,7 +178,10 @@ def main(models, rest=0, step=False):
     out_dir = os.path.join(ROOT, "evals", "results", "memory")
     os.makedirs(out_dir, exist_ok=True)
     for model in models:
-        caps = capabilities(model)
+        try:
+            caps = capabilities(model)
+        except ConfigError as exc:
+            sys.exit(f"The AI server settings can't be used: {exc}")
         print(f"== {model}", flush=True)
         if step:
             rows = run_steps(model, library, caps)

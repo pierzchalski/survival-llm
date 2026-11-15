@@ -18,6 +18,7 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from backends import ConfigError  # noqa: E402
 from core import HOST, capabilities, chat_events, system_prompt  # noqa: E402
 from library.search import Library  # noqa: E402
 from memory import Memory, prompt_section  # noqa: E402
@@ -111,7 +112,11 @@ def warm_up(model):
 
 
 def run(model):
-    library, caps = Library(), capabilities(model)
+    library = Library()
+    try:
+        caps = capabilities(model)
+    except ConfigError as exc:
+        sys.exit(f"The AI server settings can't be used: {exc}")
     load = warm_up(model)
     out_dir = os.path.join(ROOT, "evals", "results", *(["with-memory"] if MEMORY else []))
     os.makedirs(out_dir, exist_ok=True)

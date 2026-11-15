@@ -194,5 +194,6 @@ def check_reasoning(backend, model, floor):
         fix = "Add thinking to SURVIVAL_LLM_CAPS (\"caps\" in backend.json)"
     raise ConfigError(f"{model} needs to reason a little before it answers, or it may answer from memory without "
                       f"searching the library, but these settings can't ask the {backend.label} for any reasoning. "
-                      f"{fix}. To run it without reasoning anyway, set SURVIVAL_LLM_ALLOW_NO_REASONING=1 "
-                      "(\"allow_no_reasoning\": true in backend.json).")
+                      f"{fix}. To run it without reasoning anyway, or if this model has no reasoning "
+                      "mode at all, set SURVIVAL_LLM_ALLOW_NO_REASONING=1 (\"allow_no_reasoning\": true in "
+                      "backend.json).")

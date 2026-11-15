@@ -7,6 +7,7 @@ Usage: .venv/bin/python tests/reasoning_floor_test.py"""
 import json
 import os
 import subprocess
+import sqlite3
 import sys
 import tempfile
 
@@ -49,6 +50,7 @@ check("openai, qwen, no thinking setting: refused", said is not None, said)
 check("the message names the setting and the presets", said and "SURVIVAL_LLM_THINKING" in said
       and "reasoning_effort, enable_thinking, chat_template_kwargs" in said, said)
 check("and the override", said and "SURVIVAL_LLM_ALLOW_NO_REASONING=1" in said, said)
+check("and says what to do with a model that has no reasoning mode", said and "if this model has no reasoning mode" in said, said)
 check("and the model", said and said.startswith("qwen3.6-colibri "), said)
 said = refusal({**OPENAI, "SURVIVAL_LLM_THINKING": "none"}, "Qwen3.8-27B")
 check("thinking none, name in capitals: refused", said is not None and "SURVIVAL_LLM_THINKING" in said, said)
@@ -144,6 +146,15 @@ out = run(["chat.py", "How do I make creek water safe?"], {**remote, "SURVIVAL_L
 check("chat.py refuses to start, with the message", out.returncode != 0 and "settings can't be used: qwen3.6-colibri"
       in out.stderr and "SURVIVAL_LLM_THINKING" in out.stderr and "Traceback" not in out.stderr, out.stderr[-500:])
 check("and asks the model nothing", not stub.bodies("/v1/chat/completions"), stub.bodies("/v1/chat/completions"))
+# the eval scripts exit the same way (an empty library is enough: the refusal comes before any question)
+os.makedirs(os.path.join(TMP, "library"), exist_ok=True)
+sqlite3.connect(os.path.join(TMP, "library", "index.sqlite")).close()
+for script in ("citation_check", "memory_eval", "retrieval_eval"):
+    out = run([f"evals/{script}.py", "qwen3.6-colibri"], remote)
+    check(f"{script}.py exits with the message, no traceback", out.returncode != 0 and "settings can't be used: "
+          "qwen3.6-colibri" in out.stderr and "Traceback" not in out.stderr, out.stderr[-300:])
+check("and the evals asked the model nothing", not stub.bodies("/v1/chat/completions"),
+      stub.bodies("/v1/chat/completions"))
 stub.queue("GET", "/v1/models", json_reply({"data": [{"id": "qwen3.8-27b-colibri"}]}))
 out = run(["chat.py", "hi"], remote)
 check("chat.py refuses a model picked from the server's list", out.returncode != 0
