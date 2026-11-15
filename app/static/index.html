@@ -37,8 +37,8 @@
       <div id="welcome" class="welcome">
         <p id="ready-note" class="ready-note" hidden>✓ Setup is done. Survival LLM now works without internet.</p>
         <p id="library-missing" class="library-missing" hidden></p>
-        <h1>Ask anything. No internet needed.</h1>
-        <p>A local AI looks things up in an offline library of medical, emergency, how-to and encyclopedia
+        <h1 id="welcome-title">Ask anything. No internet needed.</h1>
+        <p><span id="welcome-ai">A local AI</span> looks things up in an offline library of medical, emergency, how-to and encyclopedia
           articles, then tells you where each answer came from. Click a source to read it yourself. Add your own
           documents with <strong>Your files</strong> at the top, and it searches those too. It remembers what you tell it
           about yourself between chats; see and edit that in <strong>Memory</strong>.</p>
@@ -121,7 +121,7 @@
   </div>
   <p class="meta">Add your own documents and the AI searches them along with the library: manuals for your generator or
     medical devices, prescriptions, your family's emergency plan, notes. PDF, Word, EPUB, web pages and text files.
-    They stay on this computer.</p>
+    <span class="stay-local">They stay on this computer.</span></p>
   <div id="dropzone" class="dropzone">
     <p>Drop files here, or</p>
     <button id="choose-files" class="primary" type="button">Choose files</button>
@@ -150,7 +150,7 @@
   </div>
   <p class="meta">What the AI remembers about you between chats: who's in your household, health and medicines, your
     equipment, what your files are. It reads these at the start of every chat. Edit them here, one note per line.
-    They stay on this computer.</p>
+    <span class="stay-local">They stay on this computer.</span></p>
   <label class="switch"><input type="checkbox" id="memory-writes"> Let the AI add and change notes</label>
   <textarea id="memory-text" class="prompt-text memory-text" spellcheck="true" aria-label="Memory notes, one per line"
     aria-describedby="memory-count" placeholder="Nothing yet. Notes appear here as the AI learns about you, or write your own, one per line. For example: My son Leo (9) has type 1 diabetes."></textarea>

@@ -158,17 +158,40 @@ function setStatus(kind, html) {
 const remote = (s) => !!s.backend && s.backend.kind !== "ollama";
 const serverName = (s) => `the ${s.backend.label} at ${s.backend.base_url}`;
 // Shown on every status line while the questions go to a server off this computer and its private network.
-const awayBadge = (s) => s.backend?.answers_from ? ` · <span class="badge away" title="Your questions are sent to
-  ${esc(s.backend.base_url)} over the network">Answers come from ${esc(s.backend.answers_from)}</span>` : "";
+const awayBadge = (s) => s.backend?.answers_from ? ` · <span class="badge away" title="Your questions are sent to `
+  + `${esc(s.backend.base_url)} over the network">Answers come from ${esc(s.backend.answers_from)}</span>` : "";
+const serverHost = (s) => { try { return new URL(s.backend.base_url).host; } catch { return s.backend.base_url; } };
+
+// The page's "local, offline" claims (index.html), made true for a remote server; Ollama's are left as they are.
+function remoteWording(s) {
+  if (!remote(s)) return;
+  const away = s.backend.answers_from;
+  $("ready-note").textContent = `✓ Setup is done. Answers come from ${serverName(s)}`
+    + (away ? ", over the network, so it needs a connection to it." : ".");
+  for (const el of document.querySelectorAll(".stay-local")) {
+    el.textContent = `They are kept on this computer; what the AI reads from them is sent to ${serverName(s)} with `
+      + "your questions.";
+  }
+  if (away) {
+    $("welcome-title").textContent = "Ask anything.";
+    $("welcome-ai").textContent = `An AI at ${away}`;
+  }
+}
 
 function renderStatus() {
   const s = state;
+  remoteWording(s);
   const say = (kind, html) => setStatus(kind, html + awayBadge(s));
   if (s.setup) {
     say("warn", `Setting up: ${setupSteps(s).pct}% downloaded`);
   } else if (!s.ollama && remote(s)) {
-    say("off", `${esc(s.backend.error || `Can't reach ${serverName(s)}.`)} · <button class="link" type="button"
-      id="status-retry">Try again</button>`);
+    // short, to fit the header: the whole reason is in the tooltip, the setup screen and the Model window
+    const why = s.backend.error || `Can't reach ${serverName(s)}.`;
+    say("off", `<span title="${esc(why)}">${why.startsWith("Can't reach") ? "Can't reach" : "Can't use"} the AI server
+      at ${esc(serverHost(s))}</span> · <button class="link" type="button" id="status-retry">Try again</button>`);
+  } else if (!s.models.length && remote(s)) {
+    say("warn", `<span title="Name the model to use with SURVIVAL_LLM_MODEL (&quot;model&quot; in backend.json), `
+      + `then open Survival LLM again.">The AI server at ${esc(serverHost(s))} lists no models</span>`);
   } else if (!s.ollama) {
     say(s.ollama_installed ? "warn" : "off", s.ollama_installed
       ? (s.ollama_starting ? "Starting the AI engine…"
@@ -188,7 +211,8 @@ function renderStatus() {
 
 function showModel() {
   const entry = state?.catalog.find((c) => c.model === currentModel && c.installed);
-  els.modelName.textContent = nameOf(currentModel);
+  els.modelName.textContent = !currentModel && state && remote(state)  // "none yet" reads as "download one"
+    ? (state.ollama ? "none listed" : "server not answering") : nameOf(currentModel);
   els.using.hidden = !currentModel;
   if (currentModel) {
     els.using.innerHTML = `Answering with <strong>${esc(nameOf(currentModel))}</strong>`
@@ -448,7 +472,9 @@ function chooseView(s) {
     ai = s.models.length
       ? `<p class="ob-done">Answers come from ${esc(serverName(s))}, with ${esc(nameOf(currentModel || s.models[0].model))}.
           It has its own models: pick another of them any time with Model at the top.</p>`
-      : `<p>${esc(s.backend.error || `Can't reach ${serverName(s)}.`)} The library can download meanwhile.
+      : `<p>${esc(s.ollama ? `${cap(serverName(s))} answers but lists no models. Name the one to use with
+          SURVIVAL_LLM_MODEL ("model" in backend.json), then open Survival LLM again.`
+          : s.backend.error || `Can't reach ${serverName(s)}.`)} The library can download meanwhile.
           <button class="ghost" type="button" id="setup-retry">Try again</button></p>`;
   } else if (aiUnknown) {
     ai = s.ollama_starting ? `<p class="meta">Getting the AI engine ready… (a few seconds)</p>`
@@ -504,12 +530,15 @@ function chooseView(s) {
       <button class="link" type="button" id="ob-where">Keep it somewhere else</button></p>`;
   }
   return `<div class="ob-hero"><h1>Set up Survival LLM</h1>
-      <p>Survival LLM is an AI that runs on this computer. It answers from an offline library of medical, emergency and
+      ${remote(s) ? `<p>Survival LLM answers from an offline library of medical, emergency and how-to articles, and
+        shows you where each answer came from. The answers are written by ${esc(serverName(s))}. Download the library
+        once, while you have internet. If you quit halfway, it picks up where it left off the next time you open it.</p>`
+      : `<p>Survival LLM is an AI that runs on this computer. It answers from an offline library of medical, emergency and
         how-to articles, and shows you where each answer came from. Download both once, while you have internet; after
-        that it works with none. If you quit halfway, it picks up where it left off the next time you open it.</p></div>
+        that it works with none. If you quit halfway, it picks up where it left off the next time you open it.</p>`}</div>
     ${part(1, "The library", needs.library ? "What the AI looks things up in. You can read it yourself, too." : "", lib, !needs.library)}
     ${part(2, "The AI", needs.ai ? "Runs on this computer and writes the answers. Bigger ones know more and make fewer mistakes." : "",
-      ai, !needs.ai && !aiUnknown)}
+      ai, !needs.ai && !aiUnknown && !(remote(s) && !s.models.length))}
     ${downloadGB || waitEngine ? `<div class="ob-go"><button class="primary big" type="button" id="ob-start"${ready ? "" : " disabled"}>${label}</button>${note}</div>` : ""}`;
 }
 
@@ -631,7 +660,7 @@ function renderSetup() {
   if (!show) {
     if (sawSetup && isReady()) {  // a setup this page watched just finished
       $("ready-note").hidden = false;
-      announce("Setup is done. Survival LLM now works without internet.");
+      announce(remote(s) ? $("ready-note").textContent.slice(2) : "Setup is done. Survival LLM now works without internet.");
       sawSetup = false;
     }
     setupSig = ""; els.setup.innerHTML = "";
@@ -827,6 +856,13 @@ function sourceButton(source, how, strong) {
 function needModel(text) {  // keep the question in the box so it can be sent once a model is ready
   els.input.value = text;
   autosize();
+  if (state && remote(state)) {  // nothing to download: the server has to answer, or list a model
+    els.composerNote.textContent = `${state.ollama ? `${cap(serverName(state))} lists no models.` : (state.backend.error
+      || `Can't reach ${serverName(state)}.`)} Your question will wait here and go once it has a model to answer with.`;
+    els.composerNote.hidden = false;
+    announce(els.composerNote.textContent);
+    return;
+  }
   els.composerNote.textContent = "Download an AI first (in the setup above). Your question will wait here.";
   els.composerNote.hidden = false;
   announce(els.composerNote.textContent);
