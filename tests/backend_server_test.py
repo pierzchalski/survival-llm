@@ -195,6 +195,19 @@ check("the reasoning floor refuses with the reason, before asking anything", cod
       and "settings can't be used: qwen3.6-colibri needs to reason" in json.loads(text).get("error", "")
       and len(REMOTE.bodies("/v1/chat/completions")) == n, (code, text[:300]))
 
+# ---------- a server with no /models: say to name the model, and don't ask it on every poll ----------
+listing = REMOTE.always[("GET", "/v1/models")]
+REMOTE.always[("GET", "/v1/models")] = json_reply({"error": {"message": "Not Found", "type": "not_found"}}, 404)
+server.models_seen[0] = 0
+n = len(REMOTE.bodies("/v1/models"))
+for _ in range(3):
+    s, _text = status()
+check("no model list: says to name the model", "doesn't list its models" in (s["backend"].get("error") or "")
+      and "SURVIVAL_LLM_MODEL" in s["backend"]["error"], s["backend"].get("error"))
+check("and asks the server once for three polls", len(REMOTE.bodies("/v1/models")) == n + 1,
+      len(REMOTE.bodies("/v1/models")) - n)
+REMOTE.always[("GET", "/v1/models")] = listing
+
 # ---------- the server can't be reached ----------
 REMOTE.close()
 server.models_seen[0] = 0
@@ -267,4 +280,5 @@ check("the ollama command was never run", not os.path.exists(MARK))
 check("no download or engine job, on any path", jobs == [], jobs)
 
 print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
+sys.stdout.flush()  # os._exit skips it, and run_all reads stdout through a pipe
 os._exit(1 if FAILS else 0)

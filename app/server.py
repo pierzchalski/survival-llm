@@ -833,10 +833,15 @@ def backend_status(unreachable):
     """Which server answers, for the page to show. Never the API key: the backend keeps it in its client only.
     error: why a remote server's models are missing (unreachable, a wrong key...), in plain words."""
     why = getattr(BACKEND, "last_error", None)
+    if REMOTE and unreachable and isinstance(why, BackendError) and why.kind == "not_found":
+        # it answers, but has no model list: asking again (remote_error's not_found) can't help, and would skip the cache
+        error = (f"The {BACKEND.label} at {BACKEND.base_url} doesn't list its models. Name the one to use with "
+                 "SURVIVAL_LLM_MODEL (\"model\" in backend.json), then open Survival LLM again.")
+    else:
+        error = remote_error(why) if REMOTE and unreachable and why is not None else None
     return {"kind": BACKEND.kind, "label": BACKEND.label, "base_url": BACKEND.base_url,
             "fixed_model": BACKEND.fixed_model, "features": dataclasses.asdict(FEATURES),
-            "answers_from": answers_from(BACKEND.base_url) if REMOTE else None,
-            "error": remote_error(why) if REMOTE and unreachable and why is not None else None}
+            "answers_from": answers_from(BACKEND.base_url) if REMOTE else None, "error": error}
 
 
 def visible_models(models):
