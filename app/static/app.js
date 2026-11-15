@@ -154,23 +154,34 @@ function setStatus(kind, html) {
   els.status.innerHTML = `<span class="dot ${kind}"></span>${html}`;
 }
 
+// Another server than Ollama answers (backend.json or SURVIVAL_LLM_*): it has its own models, and nothing is started.
+const remote = (s) => !!s.backend && s.backend.kind !== "ollama";
+const serverName = (s) => `the ${s.backend.label} at ${s.backend.base_url}`;
+// Shown on every status line while the questions go to a server off this computer and its private network.
+const awayBadge = (s) => s.backend?.answers_from ? ` · <span class="badge away" title="Your questions are sent to
+  ${esc(s.backend.base_url)} over the network">Answers come from ${esc(s.backend.answers_from)}</span>` : "";
+
 function renderStatus() {
   const s = state;
+  const say = (kind, html) => setStatus(kind, html + awayBadge(s));
   if (s.setup) {
-    setStatus("warn", `Setting up: ${setupSteps(s).pct}% downloaded`);
+    say("warn", `Setting up: ${setupSteps(s).pct}% downloaded`);
+  } else if (!s.ollama && remote(s)) {
+    say("off", `${esc(s.backend.error || `Can't reach ${serverName(s)}.`)} · <button class="link" type="button"
+      id="status-retry">Try again</button>`);
   } else if (!s.ollama) {
-    setStatus(s.ollama_installed ? "warn" : "off", s.ollama_installed
+    say(s.ollama_installed ? "warn" : "off", s.ollama_installed
       ? (s.ollama_starting ? "Starting the AI engine…"
         : `The AI engine (Ollama) isn't running · <button class="link" type="button" id="status-start">Start it</button>`)
       : "Setup not finished: the AI engine is needed");
   } else if (!s.models.length || !s.library) {
     const missing = [!s.models.length && "an AI model", !s.library && "the library"].filter(Boolean).join(" and ");
-    setStatus("warn", s.library || s.models.length ? `Setup not finished: needs ${missing}` : "Not set up yet");
+    say("warn", s.library || s.models.length ? `Setup not finished: needs ${missing}` : "Not set up yet");
   } else if (s.warming.includes(currentModel)) {
-    setStatus("warn", `Getting ${esc(nameOf(currentModel))} ready…`);
+    say("warn", `Getting ${esc(nameOf(currentModel))} ready…`);
   } else {
     const mine = s.my_files?.ready ? ` + ${s.my_files.ready.toLocaleString()} of your files` : "";
-    setStatus("on", `Ready to use without internet · <button class="link" type="button" id="status-library"
+    say("on", `${s.backend?.answers_from ? "Ready" : "Ready to use without internet"} · <button class="link" type="button" id="status-library"
       title="Switch libraries or move the library">${s.library.articles.toLocaleString()} articles</button>${mine}`);
   }
 }
@@ -267,7 +278,8 @@ function modelRows(container, { onlyFitting = false } = {}) {
   }
   const others = state.models.filter((m) => !state.catalog.some((c) => c.installed && c.model === m.model));
   if (others.length && !onlyFitting) {
-    container.insertAdjacentHTML("beforeend", `<div class="group-title">Other models on this computer</div>`);
+    container.insertAdjacentHTML("beforeend", `<div class="group-title">${remote(state) ? `Models ${esc(serverName(state))} serves`
+      : "Other models on this computer"}</div>`);
     for (const m of others) {
       const current = m.model === currentModel;
       const row = document.createElement("div");
@@ -286,6 +298,12 @@ function modelRows(container, { onlyFitting = false } = {}) {
 
 function renderModels() {
   const engine = state.engine?.running;
+  if (remote(state)) {  // read-only: the server is chosen in backend.json or SURVIVAL_LLM_*, read when the app opens
+    els.modelsIntro.textContent = `Answers come from ${serverName(state)}. It has its own models: Survival LLM lists the `
+      + "ones it serves and can't download others. To use another server, change backend.json or the SURVIVAL_LLM_ "
+      + "settings and open Survival LLM again." + (state.backend.error ? ` ${state.backend.error}` : "");
+    return modelRows(els.modelsList);
+  }
   els.modelsIntro.textContent = `This ${state.machine.os} computer has ${state.machine.ram_gb} GB of memory (RAM) and `
     + `${state.disk_free_gb} GB of free disk space. Bigger models know more but need more memory and are slower. `
     + "Download while you have internet, and leave Survival LLM open until it finishes; an interrupted download picks up where it left off."
@@ -393,7 +411,7 @@ function setupModels(s) {
 function chooseView(s) {
   const packs = s.packs || [], models = setupModels(s);
   const aiUnknown = !s.ollama && s.ollama_installed;  // its engine is starting: which models it has isn't known yet
-  needs = { library: !s.library, ai: !aiUnknown && !s.models.length };
+  needs = { library: !s.library, ai: !aiUnknown && !s.models.length && !remote(s) };  // a remote server: nothing to download
   if (needs.library && !packs.some((p) => p.id === choice.pack)) choice.pack = (packs.find((p) => p.id === "lite") || packs[0])?.id || null;
   if (needs.ai && !models.some((m) => m.model === choice.model && m.pickable)) {
     choice.model = (models.find((m) => m.recommended && m.pickable) || models.find((m) => m.pickable))?.model || null;
@@ -426,7 +444,13 @@ function chooseView(s) {
   }
 
   let ai;
-  if (aiUnknown) {
+  if (remote(s)) {
+    ai = s.models.length
+      ? `<p class="ob-done">Answers come from ${esc(serverName(s))}, with ${esc(nameOf(currentModel || s.models[0].model))}.
+          It has its own models: pick another of them any time with Model at the top.</p>`
+      : `<p>${esc(s.backend.error || `Can't reach ${serverName(s)}.`)} The library can download meanwhile.
+          <button class="ghost" type="button" id="setup-retry">Try again</button></p>`;
+  } else if (aiUnknown) {
     ai = s.ollama_starting ? `<p class="meta">Getting the AI engine ready… (a few seconds)</p>`
       : `<p>The AI engine didn't start. <button class="ghost" type="button" id="start-ollama">Start it again</button></p>`;
   } else if (!needs.ai) {
@@ -587,7 +611,7 @@ function renderSetup() {
   // The setup screen is for someone with no AI yet, or while setup runs. Not while the engine is only starting for
   // someone who has a library (an existing user, whose models aren't known yet); and someone with an AI but no
   // library (a download never finished, or the library is on a drive that's unplugged) gets the app with a note.
-  const engineStarting = !s.ollama && s.ollama_installed;
+  const engineStarting = !s.ollama && (s.ollama_installed || remote(s));  // or a remote server not answering yet
   const show = !!s.setup || (!s.models.length && !(engineStarting && s.library));
   const firstRun = show && !s.models.length;  // nothing to chat with yet: no toolbar or question box
   const chatting = !!els.messages.querySelector(".msg");
@@ -631,6 +655,7 @@ function renderSetup() {
   }
   if ($("ob-search")) $("ob-search").onclick = () => { showReader($("ob-search")); els.search.focus(); };
   if ($("start-ollama")) $("start-ollama").onclick = () => api("/api/start-ollama", { method: "POST", body: "{}" }).then(loadStatus);
+  if ($("setup-retry")) $("setup-retry").onclick = () => api("/api/setup/retry", { method: "POST", body: "{}" }).then(loadStatus);
   if ($("ob-where")) $("ob-where").onclick = () => moveLibrary();
   if (focusedId && $(focusedId)) $(focusedId).focus();
   else if (focusedRadio) els.setup.querySelector(`input[name="${focusedRadio[0]}"][value="${CSS.escape(focusedRadio[1])}"]`)?.focus();
@@ -761,6 +786,7 @@ libraryDialog.onclick = (e) => { if (e.target === libraryDialog) libraryDialog.c
 els.status.addEventListener("click", (e) => {
   if (e.target.id === "status-library") openLibrary();
   if (e.target.id === "status-start") api("/api/start-ollama", { method: "POST", body: "{}" }).then(loadStatus).catch(() => {});
+  if (e.target.id === "status-retry") api("/api/setup/retry", { method: "POST", body: "{}" }).then(loadStatus).catch(() => {});
 });
 
 // ---------- chat ----------
