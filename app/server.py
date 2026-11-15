@@ -36,7 +36,7 @@ import weakref
 import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -317,7 +317,7 @@ def my_name(path):
 
 
 def to_trash(path):
-    """Move a file to the Trash (Mac) or Recycle Bin (Windows), so removing one of their files can be undone."""
+    """Move a file to the Trash (Mac, Linux) or Recycle Bin (Windows), so removing one of their files can be undone."""
     if sys.platform == "darwin":
         try:
             from Foundation import NSURL, NSFileManager  # part of pywebview's macOS dependencies
@@ -336,7 +336,42 @@ def to_trash(path):
         subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], check=True, timeout=60,
                        env={**os.environ, "SURVIVAL_LLM_TRASH": path}, creationflags=0x08000000)  # no console window
     else:
-        os.remove(path)
+        linux_trash(path)
+
+
+def linux_trash(path):
+    """The desktop's own Trash (gio, as the file manager uses), else the freedesktop.org Trash in the home folder.
+    Raises OSError rather than deleting for good, since the page says the file can be got back from the Trash."""
+    if shutil.which("gio"):
+        try:
+            subprocess.run(["gio", "trash", "--", path], check=True, capture_output=True, timeout=60)
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass  # no Trash on that disk, say: do it by hand below
+    trash = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"),
+                         "Trash")
+    os.makedirs(os.path.join(trash, "files"), exist_ok=True)
+    os.makedirs(os.path.join(trash, "info"), exist_ok=True)
+    base, ext = os.path.splitext(os.path.basename(path))
+    name, n = base + ext, 1
+    while True:  # claim a name in info/ first, as the spec asks, so two removals never pick the same one
+        if not os.path.lexists(os.path.join(trash, "files", name)):  # nor overwrite a file left without its info
+            try:
+                fd = os.open(os.path.join(trash, "info", name + ".trashinfo"),
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                break
+            except FileExistsError:
+                pass
+        n += 1
+        name = f"{base}.{n}{ext}"
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(f"[Trash Info]\nPath={quote(os.fsencode(os.path.abspath(path)))}\n"
+                    f"DeletionDate={datetime.datetime.now():%Y-%m-%dT%H:%M:%S}\n")
+        shutil.move(path, os.path.join(trash, "files", name))
+    except BaseException:
+        os.remove(os.path.join(trash, "info", name + ".trashinfo"))
+        raise
 
 
 def open_folder(path):
@@ -391,6 +426,8 @@ def disk_free_gb(path=None):
 
 
 def system_key():
+    """Which column of CATALOG this computer gets: "mac", else "win", Linux included (the PC builds, not the Mac's
+    -mlx and -nvfp4 tags; the PC sizes, blurbs and PREFERENCE fit a Linux PC as they fit a Windows one)."""
     return "mac" if sys.platform == "darwin" else "win"
 
 
@@ -1211,6 +1248,15 @@ def keep_awake():
     if os.name == "nt":  # for this thread, which runs the whole setup
         ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
         return lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+    if shutil.which("systemd-inhibit"):  # Linux with systemd: hold off idle sleep until this lets go (or the app ends)
+        try:
+            proc = subprocess.Popen(["systemd-inhibit", "--what=idle:sleep", "--who=Survival LLM",
+                                     "--why=Downloading the AI model or library", "--mode=block",
+                                     "tail", f"--pid={os.getpid()}", "-f", "/dev/null"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            return lambda: None
+        return proc.terminate
     return lambda: None
 
 
@@ -2128,6 +2174,7 @@ if __name__ == "__main__":
     if sys.stdout is None:  # Windows pythonw (no console): keep the log instead of losing it
         os.makedirs(APP_DIR, exist_ok=True)
         sys.stdout = sys.stderr = open(os.path.join(APP_DIR, "app.log"), "a", buffering=1)
+    sys.argv[0] = os.path.abspath(sys.argv[0])  # pywebview finds its base folder from it, after the chdir below
     os.chdir(os.path.expanduser("~"))  # nor can anything started from here, like the person's own Ollama, hold it
     headless, use_browser = "--no-browser" in sys.argv, "--browser" in sys.argv
     existing = None if "--port" in sys.argv else running_instance()  # an explicit port means "start another"

@@ -452,7 +452,12 @@ function chooseView(s) {
         search it yourself.</p>`)
       + (others.length ? `<details class="ob-more" id="ob-more"${open ? " open" : ""}><summary>${best ? "Other AI models" : "The AI models"}
           (${others.length})</summary>${others.map(modelOption).join("")}</details>` : "");
-    if (!s.ollama_installed && !s.engine?.downloadable) {
+    if (!s.ollama_installed && !s.engine?.downloadable && s.machine.os === "Linux") {
+      ai = `<p>Survival LLM uses the free Ollama engine to run the AI on this computer. Install it while you have internet:
+        <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>, or your
+        distribution's ollama package. Survival LLM starts the <code>ollama</code> command when it's on your PATH, or
+        uses an Ollama already running at <code>OLLAMA_HOST</code>. Setup carries on by itself once Ollama is running.</p>` + ai;
+    } else if (!s.ollama_installed && !s.engine?.downloadable) {
       ai = `<p>Survival LLM uses the free Ollama app to run the AI on this computer. Install it while you have internet:
         <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>. Setup carries on by
         itself once Ollama is running.</p>` + ai;
@@ -534,6 +539,10 @@ function stepLine(s, step, first, rate) {
       <button class="ghost" type="button" id="ob-retry">Try again</button>`;
   } else if (step.kind === "model" && st.waiting === "engine-starting") {
     text = "Starting the AI engine…";
+  } else if (step.kind === "model" && st.waiting === "install-engine" && s.machine.os === "Linux") {
+    text = `Install Ollama to run it: <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>,
+      or your distribution's ollama package, so the <code>ollama</code> command is on your PATH.
+      Setup carries on by itself once Ollama is running.`;
   } else if (step.kind === "model" && st.waiting === "install-engine") {
     text = `Install the free Ollama app to run it: <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>.
       Setup carries on by itself once Ollama is running.`;

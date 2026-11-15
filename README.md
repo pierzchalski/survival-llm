@@ -11,7 +11,7 @@ and shows you the exact passage each answer came from.
 - **Yours to adjust.** The Instructions button shows the instructions the AI gets before you ask anything (the app adds today's date, the names of your files and your Memory notes after them); edit them and Save to change how it answers (Reset brings back the original). The Length limit next to Send sets how long an answer may run, or turns the limit off.
 - **Add your own files.** Your files, at the top, takes PDFs, Word documents, EPUB ebooks, web pages and text files (drop them on the window or choose them), so the AI can search your generator's manual, your medicines list or your family's emergency plan along with the library. They stay on your computer, in the `Survival LLM Files` folder in your home folder; files you put in that folder, or change there, are picked up on their own. It can't read scans or photos of pages yet.
 - **Remembers you.** Tell it your daughter is allergic to penicillin or that you have a Honda generator, and it saves a short note so later chats know it too; each answer shows what it saved, with Undo. Memory, at the top, shows every note in one list you can edit, and a switch turns off the AI's saving (it still reads the notes you keep). The notes stay on your computer, in one plain text file with the app's settings.
-- **Updates itself.** Check for updates, at the bottom of the window, looks for a new version (it also looks once a day while it runs, by fetching one small file from the project's web page; nothing about you is sent). Update now downloads it, checks it, and restarts into it, keeping your models, library, files and settings. Newer libraries are offered there too.
+- **Updates itself** (on Mac and Windows; on Linux, update with `git pull`, see Install). Check for updates, at the bottom of the window, looks for a new version (it also looks once a day while it runs, by fetching one small file from the project's web page; nothing about you is sent). Update now downloads it, checks it, and restarts into it, keeping your models, library, files and settings. Newer libraries are offered there too.
 - **Built for emergencies.** About 1.5 million articles (500,000 in the smaller download): about 930,000 of Wikipedia's most-read articles, WikiMed, MedlinePlus, a UK medicines guide, WikEM, Ready.gov, CDC, U.S. military and FEMA survival and first-aid manuals, the USDA canning guide, risk references for estimating micromorts (life tables, U.S. death rates), wikiHow, iFixit, Appropedia, Energypedia and practical Q&A. See [SOURCES.md](SOURCES.md).
 
 ## Install
@@ -30,8 +30,18 @@ your computer and internet speed (the biggest AI model is 80 GB); you only click
 2. Open the extracted **Survival LLM** folder and double-click **Survival LLM.bat**. If Windows says it protected
    your PC, click **More info**, then **Run anyway**.
 
-**Then** the app opens in its own window and walks you through setup:
-1. **AI engine:** built into the Mac app. On Windows, one click downloads it (Ollama, 1.6 GB).
+**Linux** (from the source code; there is no Linux download yet)
+1. Get the code: `git clone https://github.com/anonnerdfrenzy/survival-llm.git`
+2. Run `survival-llm/packaging/install-linux.sh`. It needs Python 3.10 or newer with its venv module (on Debian and
+   Ubuntu, `sudo apt install python3-venv`). It adds **Survival LLM** to your app menu and a `survival-llm`
+   command. The app gets its own window if your system has WebKitGTK (the script names the packages if it
+   doesn't); otherwise it opens in your web browser. To update, `git pull` and run the script again.
+3. Install Ollama yourself ([ollama.com/download](https://ollama.com/download), or your distribution's package). The
+   app starts the `ollama` command if it is on your PATH, or uses an Ollama already running at `OLLAMA_HOST`.
+
+**Then** the app opens (in its own window, or in your web browser on Linux without WebKitGTK) and walks you through setup:
+1. **AI engine:** built into the Mac app. On Windows, one click downloads it (Ollama, 1.6 GB). On Linux, it uses the
+   Ollama you installed.
 2. **AI model:** it suggests the best one for your computer's memory (below) and downloads it.
 3. **Library:** "Everything" (8.8 GB download) or "Essentials" (1.3 GB, without Wikipedia and iFixit).
 
@@ -40,12 +50,15 @@ your computer and internet speed (the biggest AI model is 80 GB); you only click
 
 ## Uninstall
 
-Delete the app, then these folders: the AI models, in `~/.ollama/models` (shared with any other Ollama on the
-computer, so keep it if you use Ollama elsewhere), and the library. The app's Library window (Search library, then
+Delete the app, then these folders: the AI models, in `~/.ollama/models` (on Linux, `/usr/share/ollama/.ollama/models` if Ollama runs as a system
+service, as Ollama's own installer sets it up; shared with any other Ollama on the computer, so keep it if you use
+Ollama elsewhere), and the library. The app's Library window (Search library, then
 Switch or move the library) shows where the library is: in `~/Survival LLM Library` if you installed it before 0.4, otherwise
 in the app's settings folder unless you moved it. Your own files are in `~/Survival LLM Files` unless you picked
 another folder; keep it if you want them. The app's own settings are in `~/Library/Application Support/Survival LLM`
-on a Mac, and in `%APPDATA%\Survival LLM` plus the AI engine and library in `%LOCALAPPDATA%\Survival LLM` on Windows.
+on a Mac, in `%APPDATA%\Survival LLM` plus the AI engine and library in `%LOCALAPPDATA%\Survival LLM` on Windows,
+and in `~/.survival-llm` (library included) on Linux, where `packaging/install-linux.sh --uninstall` removes the app
+menu entry, the command and its Python environment.
 
 ## Which model your computer gets
 
@@ -55,7 +68,7 @@ The app checks your memory and suggests a model. More memory, smarter model.
 |---|---|---|
 | Mac with 128 GB or more | NVIDIA Nemotron 3.5 Super (`nemotron-3.5-super:120b-a12b-nvfp4`) | 80 GB |
 | Mac with 32-96 GB | Qwen3.8 27B (`qwen3.8:27b-mlx`) | 18 GB |
-| Windows PC with 32 GB or more | NVIDIA Nemotron 3.5 Lightning (`nemotron-3.5-lightning:30b-a3b`) | 25 GB |
+| Windows or Linux PC with 32 GB or more | NVIDIA Nemotron 3.5 Lightning (`nemotron-3.5-lightning:30b-a3b`) | 25 GB |
 | Mac or PC with 16-31 GB | IBM Granite 4.2 8B (`granite4.2:8b`) | 6 GB |
 
 Nemotron Super needs 128 GB because macOS lets the graphics side use only about three quarters of memory.
