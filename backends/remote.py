@@ -19,6 +19,8 @@ def model_names(answer):
 class RemoteBackend(Backend):
     features = Features(list_models=True)
     THINKING = ("none",)  # the ways of asking for reasoning this wire format knows
+    reasoning_floor = ()  # more models that need a brief think at Reasoning off (config.py)
+    allow_no_reasoning = False  # run such a model with no reasoning when none can be asked for
 
     def __init__(self, base_url, api_key="", model=None, thinking="none", max_tokens=None, caps=None):
         """base_url: up to and including /v1, e.g. "http://127.0.0.1:8000/v1". caps: the capabilities to report

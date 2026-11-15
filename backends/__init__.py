@@ -5,7 +5,7 @@ from .base import Backend, Features
 from .ollama import OllamaBackend
 from .openai_chat import OpenAIBackend
 from .anthropic_messages import AnthropicBackend
-from .config import ConfigError, from_config
+from .config import ConfigError, check_reasoning, from_config
 
-__all__ = ["AnthropicBackend", "Backend", "BackendError", "ConfigError", "Features", "OllamaBackend", "OpenAIBackend",
+__all__ = ["AnthropicBackend", "Backend", "BackendError", "ConfigError", "check_reasoning", "Features", "OllamaBackend", "OpenAIBackend",
            "from_config"]

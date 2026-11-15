@@ -89,7 +89,18 @@ def family(model):
     return next((f for f in SAMPLING if f in names), "")
 
 
+def reasoning_floor(model, fam=None):
+    """Whether Reasoning off still means a brief think for this model: THINK_OFF's families, and any model the remote
+    settings name (reasoning_floor in backends/config.py). fam: family(model), when already known."""
+    return (family(model) if fam is None else fam) in THINK_OFF \
+        or any(f in model.lower() for f in getattr(BACKEND, "reasoning_floor", ()))
+
+
 def capabilities(model):
+    """What the model can do. Raises backends.ConfigError for a remote model with a reasoning floor that the settings
+    give no way to ask for reasoning (backends.check_reasoning)."""
+    if BACKEND.kind != "ollama":  # Ollama says itself whether a model can reason
+        backends.check_reasoning(BACKEND, model, reasoning_floor(model))
     return BACKEND.capabilities(model)
 
 
@@ -99,7 +110,7 @@ def think_setting(model, caps, reasoning="off"):
         return None
     fam = family(model)
     if REASONING_LIMITS.get(reasoning, 0) == 0:
-        return THINK_OFF.get(fam, False)
+        return THINK_OFF.get(fam) or ("low" if reasoning_floor(model, fam) else False)
     if reasoning in ("long", "none"):
         return THINK_LONG.get(fam, True)
     return "low" if fam == "qwen" and reasoning == "short" else True

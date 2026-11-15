@@ -142,7 +142,10 @@ def main():
                 library = None
         except Exception:
             library = None
-    caps = capabilities(model)
+    try:
+        caps = capabilities(model)
+    except ConfigError as exc:  # a model that must reason a little, and settings that can't ask for it
+        sys.exit(f"The AI server settings can't be used: {exc}")
     messages = [{"role": "system", "content": system_prompt(library, "tools" in caps)}]
     level, length = "off", "normal"  # the Reasoning setting, and the length limit
 

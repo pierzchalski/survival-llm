@@ -14,6 +14,14 @@ always gives Ollama):
                                                     anthropic_messages.THINKING)
   "max_tokens"      SURVIVAL_LLM_MAX_TOKENS         a ceiling on reply length
   "caps"            SURVIVAL_LLM_CAPS               what the model can do: "tools,thinking", "tools" or "none"
+  "reasoning_floor" SURVIVAL_LLM_REASONING_FLOOR    more models that must reason a little even at Reasoning off,
+                                                    by part of their name: "mistral,glm" (Qwen always does)
+  "allow_no_reasoning" SURVIVAL_LLM_ALLOW_NO_REASONING  1: start even when such a model can't be asked to reason
+
+A model with a reasoning floor (core.THINK_OFF, or reasoning_floor) searches the library only if it reasons a little
+first, so at Reasoning off core still asks for a brief think. That needs a "thinking" setting the server accepts; with
+none (or caps without thinking), check_reasoning() refuses the model rather than run it fully off, unless
+allow_no_reasoning is set.
 
 Everything but "backend" is for openai and anthropic: Ollama's address stays OLLAMA_HOST. The settings are read once,
 when core.py is imported. Only the terminal chat (chat.py) can use openai or anthropic so far: the app window
@@ -31,7 +39,8 @@ from .anthropic_messages import AnthropicBackend
 from .ollama import OllamaBackend
 from .openai_chat import OpenAIBackend
 
-FIELDS = ("backend", "base_url", "api_key", "api_key_file", "model", "thinking", "max_tokens", "caps")
+FIELDS = ("backend", "base_url", "api_key", "api_key_file", "model", "thinking", "max_tokens", "caps",
+          "reasoning_floor", "allow_no_reasoning")
 KINDS = {"ollama": OllamaBackend, "openai": OpenAIBackend, "anthropic": AnthropicBackend}
 HOST_PORT = re.compile(r"^[A-Za-z0-9._\-]+(:\d{1,5})?$|^\[[0-9a-fA-F:.]+\](:\d{1,5})?$")  # host[:port], nothing else
 
@@ -151,6 +160,39 @@ def from_config(ollama_url, env=None, path=None):
     if conf.get("thinking"):
         options["thinking"] = str(conf["thinking"]).strip().lower()
     try:
-        return KINDS[kind](base, **options)
+        backend = KINDS[kind](base, **options)
     except ValueError as exc:  # an unknown thinking setting
         raise ConfigError(str(exc)) from None
+    floor = conf.get("reasoning_floor") or []
+    floor = floor.split(",") if isinstance(floor, str) else floor if isinstance(floor, list) else None
+    if floor is None or not all(isinstance(f, str) for f in floor):
+        raise ConfigError('reasoning_floor must name models by part of their name, e.g. "mistral,glm"')
+    backend.reasoning_floor = tuple(f.strip().lower() for f in floor if f.strip())
+    allow = conf.get("allow_no_reasoning")
+    allow = allow if isinstance(allow, bool) else str(allow or "0").strip().lower()
+    if allow not in (True, False, "1", "true", "yes", "0", "false", "no"):
+        raise ConfigError("allow_no_reasoning must be 1 or 0")
+    backend.allow_no_reasoning = allow in (True, "1", "true", "yes")
+    return backend
+
+
+def check_reasoning(backend, model, floor):
+    """ConfigError when model has a reasoning floor (floor: core.THINK_OFF or the reasoning_floor setting) but these
+    settings give no way to ask the server for reasoning, so Reasoning off would run it with none at all, unless
+    allow_no_reasoning is set. Nothing to check for Ollama, which says itself whether a model can reason, or for a
+    model not given the library's tools (core then adds the excerpts itself, so there is no search to skip)."""
+    caps = backend.capabilities(model) if backend.kind != "ollama" else set()
+    if not floor or backend.allow_no_reasoning or "tools" not in caps:
+        return
+    if backend.thinking != "none" and "thinking" in caps:
+        return
+    presets = ", ".join(t for t in backend.THINKING if t != "none")
+    if backend.thinking == "none":
+        fix = (f"Set SURVIVAL_LLM_THINKING (\"thinking\" in backend.json) to the way this server takes a reasoning "
+               f"setting: {presets}")
+    else:
+        fix = "Add thinking to SURVIVAL_LLM_CAPS (\"caps\" in backend.json)"
+    raise ConfigError(f"{model} needs to reason a little before it answers, or it may answer from memory without "
+                      f"searching the library, but these settings can't ask the {backend.label} for any reasoning. "
+                      f"{fix}. To run it without reasoning anyway, set SURVIVAL_LLM_ALLOW_NO_REASONING=1 "
+                      "(\"allow_no_reasoning\": true in backend.json).")
