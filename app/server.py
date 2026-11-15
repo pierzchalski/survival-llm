@@ -1951,7 +1951,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._chat(body)
         if (url.path == "/api/pull" and not FEATURES.manage_models
                 or url.path in ("/api/engine", "/api/start-ollama") and not FEATURES.engine_lifecycle):
-            return self._send(409, {"error": f"Survival LLM uses {BACKEND.label} at {BACKEND.base_url}, which "
+            return self._send(409, {"error": f"Survival LLM uses the {BACKEND.label} at {BACKEND.base_url}, which "
                                              "manages its own models: the app doesn't download or start anything for it."})
         if url.path == "/api/pull":
             started = start_job(f"model:{model}", friendly_name(model), pull_worker, model)
