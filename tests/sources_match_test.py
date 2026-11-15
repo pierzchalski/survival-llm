@@ -36,6 +36,8 @@ CERT = {"title": "FEMA CERT Basic Training Participant Manual", "source": "U.S. 
         "url": "https://www.ready.gov/sites/default/files/2019.CERT_.Basic_.PM_FINAL_508c.pdf"}
 ATP = {"title": "US Army ATP 3-50.21: Survival", "source": "U.S. government survival and first-aid manuals",
        "url": "https://armypubs.army.mil/epubs/DR_pubs/DR_a/pdf/web/ARN12086_ATP%203-50x21%20FINAL%20WEB%202.pdf"}
+WHOBEC = {"title": "WHO-ICRC Basic Emergency Care (2018)", "source": "IFRC and WHO first-aid and emergency care guides",
+          "url": "https://iris.who.int/x"}
 BURNS, WATER = [MEDLINE, WIKIMED, WIKIHOW], [CERT, ATP]
 
 # ---- named only what it opened: no correction ----
@@ -76,6 +78,12 @@ for line, read in [
     ("Sources: Burns (Mayo Clinic)", BURNS),
     ("Sources: US Army ATP 3-50.21 Survival (Ready.gov)", WATER),  # Ready.gov is the other article's website
     ("Sources: Preventing and Treating Burns (Ready.gov)", WATER),  # a real Ready.gov page, but not one it opened
+    # a collection's descriptive words ("first aid") plus a word of the opened title is not a name
+    ("Sources: Army First Aid Manual", [ATP]),  # the library's "First Aid (FM 4-25.11)" was not opened
+    ("Sources: Basic First Aid", [CERT]),
+    ("Sources: FEMA First Aid", [CERT]),
+    ("Sources: Government Training Manual", [CERT]),
+    ("Sources: Basic First Aid Guidelines", [WHOBEC]),
     # a website named on its own is not an article
     ("Sources: Ready.gov", WATER),
 ]:

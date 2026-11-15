@@ -726,8 +726,9 @@ def _names_article(text, article, articles, full=None):
         return True
     if title and len(words - source) >= 2 and words - source <= title:  # a shortened title
         return True
-    if title and words & source and words - source and words - source <= title:  # "MedlinePlus Burns": its collection
-        return True                                                              # and words from its title
+    lead = _content_words(article["source"].split()[0]) if article["source"].split() else set()
+    if title and lead and lead <= words and words - source and words - source <= title:  # "MedlinePlus Burns": its collection
+        return True                                                                     # and words from its title
     return words <= source  # just the collection: fine if it read something from it
 
 
